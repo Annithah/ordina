@@ -7,15 +7,20 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { href } from '@/utils/href';
-import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import * as Linking from 'expo-linking';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppTheme } from '@/providers/theme-provider';
 import { useI18n } from '@/providers/i18n-provider';
+import { deleteAccount } from '@/services/ai';
+import { disconnectGoogleCalendar } from '@/services/google-calendar';
 import { useAuthStore } from '@/store/auth-store';
 import { LOCALES } from '@/i18n/translations';
+
+const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL;
 
 interface SettingRowProps {
   label: string;
@@ -43,27 +48,6 @@ function SettingRow({ label, value, onPress, showChevron = true }: SettingRowPro
         )}
       </View>
     </Pressable>
-  );
-}
-
-interface ToggleRowProps {
-  label: string;
-  value: boolean;
-  onToggle: (v: boolean) => void;
-}
-
-function ToggleRow({ label, value, onToggle }: ToggleRowProps) {
-  const theme = useTheme();
-  return (
-    <View style={[styles.settingRow, { borderBottomColor: theme.border }]}>
-      <ThemedText style={styles.settingLabel}>{label}</ThemedText>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ false: theme.border, true: theme.primary }}
-        thumbColor="#FFFFFF"
-      />
-    </View>
   );
 }
 
@@ -113,11 +97,6 @@ export default function ProfileScreen() {
             <ThemedText themeColor="textSecondary" style={styles.userEmail}>
               {user?.email ?? t('profile.signInHint')}
             </ThemedText>
-            <Pressable>
-              <ThemedText style={[styles.editProfile, { color: theme.primary }]}>
-                Edit Profile
-              </ThemedText>
-            </Pressable>
           </View>
         </View>
 
@@ -155,28 +134,49 @@ export default function ProfileScreen() {
           <SettingRow label={t('profile.appLock')} onPress={() => router.push(href('/create-pin'))} />
         </View>
 
-        {/* AI Settings */}
+        {/* Connections */}
         <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <SectionLabel title="AI SETTINGS" />
-          <ToggleRow label="AI Suggestions" value={true} onToggle={() => {}} />
-          <SettingRow label="Voice Input Language" value="English (US)" />
-          <ToggleRow label="Auto-schedule Tasks" value={false} onToggle={() => {}} />
-        </View>
-
-        {/* Notifications */}
-        <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <SectionLabel title="NOTIFICATIONS" />
-          <ToggleRow label="Task Reminders" value={true} onToggle={() => {}} />
-          <ToggleRow label="Deadline Alerts" value={true} onToggle={() => {}} />
-          <ToggleRow label="AI Scheduling Suggestions" value={true} onToggle={() => {}} />
-          <SettingRow label="Notification Sound" value="Default" />
+          <SectionLabel title="CONNECTIONS" />
+          <SettingRow
+            label="Google Calendar, contacts & permissions"
+            onPress={() => router.push(href('/integrations'))}
+          />
+          <SettingRow label="Reminders" onPress={() => router.push(href('/reminders'))} />
+          <SettingRow label="Replay introduction" onPress={() => router.push(href('/onboarding'))} />
         </View>
 
         {/* Account */}
         <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <SectionLabel title="ACCOUNT" />
-          <SettingRow label="Privacy & Data" />
-          <SettingRow label="Export Data" />
+          {PRIVACY_URL ? (
+            <SettingRow label="Privacy policy" onPress={() => void Linking.openURL(PRIVACY_URL)} />
+          ) : null}
+          <Pressable
+            onPress={() => {
+              Alert.alert(
+                'Delete account?',
+                'This permanently deletes your ORDINA account, tasks, plans and reminders. This cannot be undone.',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => {
+                      void deleteAccount()
+                        .then(() => disconnectGoogleCalendar().catch(() => undefined))
+                        .then(() => signOut())
+                        .then(() => router.replace(href('/sign-in')))
+                        .catch((error: any) => {
+                          Alert.alert('Delete account', error?.response?.data?.message || 'Could not delete the account. Try again.');
+                        });
+                    },
+                  },
+                ],
+              );
+            }}
+            style={[styles.settingRow, { borderBottomColor: theme.border }]}>
+            <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>Delete account</ThemedText>
+          </Pressable>
           <Pressable
             onPress={() => {
               void signOut().then(() => router.replace(href('/sign-in')));
@@ -253,7 +253,6 @@ const styles = StyleSheet.create({
   },
   userName: { fontSize: 16, fontFamily: 'Poppins_600SemiBold' },
   userEmail: { fontSize: 13, marginTop: 1 },
-  editProfile: { fontSize: 13, marginTop: 4, fontFamily: 'Poppins_500Medium' },
   section: {
     borderWidth: 1,
     borderRadius: 16,

@@ -1,51 +1,59 @@
-import * as Calendar from 'expo-calendar';
-import * as Contacts from 'expo-contacts';
+import * as Contacts from 'expo-contacts/legacy';
 import * as ImagePicker from 'expo-image-picker';
 
-export async function matchingContacts(message: string) {
+export type MatchedContact = { name: string; phone?: string };
+
+/** Contacts whose names appear in the instruction. Only these matches leave the device, never the address book. */
+export async function matchingContacts(message: string): Promise<MatchedContact[]> {
   const permission = await Contacts.getPermissionsAsync();
   if (!permission.granted) return [];
+  const words = message.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 2);
+  if (!words.length) return [];
   const { data } = await Contacts.getContactsAsync({
-    fields: [Contacts.Fields.Name],
-    pageSize: 50,
+    fields: [Contacts.Fields.Name, Contacts.Fields.PhoneNumbers],
   });
-  const words = message.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2);
   return data
     .filter((contact) => {
-      const name = (contact.name || '').toLowerCase();
-      return words.some((word) => name.includes(word));
+      const parts = (contact.name || '').toLowerCase().split(/\s+/);
+      return parts.some((part) => part.length > 2 && words.includes(part));
     })
     .slice(0, 8)
-    .map((contact) => ({ name: contact.name || 'Unknown' }));
-}
-
-export async function createCalendarEvents(
-  events: { title: string; date?: string; startTime?: string; durationMinutes?: number }[],
-) {
-  const permission = await Calendar.getCalendarPermissionsAsync();
-  if (!permission.granted || !events.length) return { created: 0, skipped: true as const };
-  const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-  const writable = calendars.find((item) => item.allowsModifications) || calendars[0];
-  if (!writable) return { created: 0, skipped: true as const };
-  let created = 0;
-  for (const event of events) {
-    if (!event.date) continue;
-    const start = new Date(`${event.date}T${event.startTime || '09:00'}:00`);
-    const end = new Date(start.getTime() + (event.durationMinutes || 60) * 60 * 1000);
-    await Calendar.createEventAsync(writable.id, {
-      title: event.title,
-      startDate: start,
-      endDate: end,
+    .map((contact) => {
+      const phone = contact.phoneNumbers?.find((item) => item.isPrimary)?.number ?? contact.phoneNumbers?.[0]?.number;
+      return { name: contact.name || 'Unknown', phone: phone || undefined };
     });
-    created += 1;
-  }
-  return { created, skipped: false as const };
 }
 
-export async function pickTaskImage() {
-  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-  if (!permission.granted) return null;
-  const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.6 });
-  if (result.canceled) return null;
-  return result.assets[0];
+/** Gemini accepts up to ~20 MB inline; base64 adds a third, so keep raw media below this. */
+export const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
+const MAX_VIDEO_SECONDS = 60;
+
+export type MediaSource = 'camera-photo' | 'camera-video' | 'library';
+
+export async function pickTaskMedia(source: MediaSource) {
+  if (source === 'library') {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) throw new Error('Allow photo library access in Settings to attach images or videos.');
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images', 'videos'],
+      quality: 0.6,
+      videoMaxDuration: MAX_VIDEO_SECONDS,
+      videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+    });
+    return result.canceled ? null : result.assets[0];
+  }
+  const permission = await ImagePicker.requestCameraPermissionsAsync();
+  if (!permission.granted) throw new Error('Allow camera access in Settings to capture tasks.');
+  if (source === 'camera-video') {
+    const { requestRecordingPermissionsAsync } = await import('expo-audio');
+    const microphone = await requestRecordingPermissionsAsync();
+    if (!microphone.granted) throw new Error('Allow microphone access so ORDINA can hear your video.');
+  }
+  const result = await ImagePicker.launchCameraAsync({
+    mediaTypes: source === 'camera-video' ? ['videos'] : ['images'],
+    quality: 0.6,
+    videoMaxDuration: MAX_VIDEO_SECONDS,
+    videoQuality: ImagePicker.UIImagePickerControllerQualityType.Medium,
+  });
+  return result.canceled ? null : result.assets[0];
 }

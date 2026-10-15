@@ -15,16 +15,16 @@ async function randomPasswordHash() {
 }
 
 async function upsertOAuthUser({ email, name, googleId, appleId }) {
-  if (!email) {
-    const error = new Error('The identity provider did not share an email address.');
-    error.status = 400;
-    throw error;
-  }
-  const normalized = String(email).trim().toLowerCase();
+  const normalized = email ? String(email).trim().toLowerCase() : null;
   let user = null;
   if (googleId) user = await prisma.user.findFirst({ where: { googleId } });
   if (!user && appleId) user = await prisma.user.findFirst({ where: { appleId } });
-  if (!user) user = await prisma.user.findUnique({ where: { email: normalized } });
+  if (!user && normalized) user = await prisma.user.findUnique({ where: { email: normalized } });
+  if (!user && !normalized) {
+    const error = new Error('The identity provider did not share an email address for this account.');
+    error.status = 400;
+    throw error;
+  }
   if (!user) {
     user = await prisma.user.create({
       data: {
@@ -59,7 +59,7 @@ function googleAudiences() {
 async function verifyGoogleIdToken(idToken) {
   const allowed = googleAudiences();
   if (!allowed.length) {
-    const error = new Error('Google sign-in is not configured. Set GOOGLE_CLIENT_ID on the API.');
+    const error = new Error('Google sign-in is not configured. Set the matching Google client IDs on the API.');
     error.status = 503;
     throw error;
   }

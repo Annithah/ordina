@@ -17,11 +17,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ContactActions } from '@/components/contact-actions';
 import { ThemedText } from '@/components/themed-text';
 import { Radii, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useTasksStore, type Task } from '@/store/tasks-store';
 import { href } from '@/utils/href';
+import { addLocalDays, localDateKey } from '@/utils/dates';
+import { HEALTH_LABEL, healthColor, taskHealth } from '@/utils/task-health';
 
 type FilterKey = 'all' | 'today' | 'this_week' | 'overdue' | 'completed';
 
@@ -55,11 +58,11 @@ function getCategoryLabel(category: Task['category']): string {
 
 function formatDueLabel(dueDate?: string): string {
   if (!dueDate) return '';
-  const today = new Date().toISOString().split('T')[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const today = localDateKey();
+  const tomorrow = addLocalDays(today, 1);
   if (dueDate === today) return 'Today';
   if (dueDate === tomorrow) return 'Tomorrow';
-  const d = new Date(dueDate);
+  const d = new Date(`${dueDate}T12:00:00`);
   return `${d.toLocaleString('default', { month: 'short' })} ${d.getDate()}`;
 }
 
@@ -71,10 +74,12 @@ interface TaskRowProps {
 
 function TaskRow({ task, onPress, onToggle }: TaskRowProps) {
   const theme = useTheme();
+  const health = taskHealth(task);
+  const statusColor = healthColor(health, theme);
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.taskRow, { backgroundColor: theme.card, borderColor: theme.border }]}
+      style={[styles.taskRow, { backgroundColor: theme.card, borderColor: theme.border, borderLeftColor: statusColor, borderLeftWidth: 4 }]}
     >
       <TouchableOpacity
         onPress={onToggle}
@@ -82,8 +87,8 @@ function TaskRow({ task, onPress, onToggle }: TaskRowProps) {
         style={[
           styles.checkbox,
           {
-            borderColor: task.completed ? theme.primary : theme.border,
-            backgroundColor: task.completed ? theme.primary : 'transparent',
+            borderColor: task.completed ? theme.success : theme.border,
+            backgroundColor: task.completed ? theme.success : 'transparent',
           },
         ]}
       >
@@ -103,10 +108,16 @@ function TaskRow({ task, onPress, onToggle }: TaskRowProps) {
           </ThemedText>
           {task.dueDate && (
             <ThemedText themeColor="textSecondary" style={styles.metaText}>
-              • {formatDueLabel(task.dueDate)}
+              • {formatDueLabel(task.dueDate)}{task.startTime ? ` ${task.startTime}` : ''}
             </ThemedText>
           )}
+          <ThemedText style={[styles.metaText, { color: statusColor }]}>• {HEALTH_LABEL[health]}</ThemedText>
         </View>
+        {task.contactPhone && !task.completed ? (
+          <View style={{ marginTop: 6 }}>
+            <ContactActions name={task.contactName} phone={task.contactPhone} />
+          </View>
+        ) : null}
       </View>
       <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
     </Pressable>
@@ -135,8 +146,8 @@ export default function TasksScreen() {
     void loadTasks();
   }, [loadTasks]);
 
-  const today = new Date().toISOString().split('T')[0];
-  const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0];
+  const today = localDateKey();
+  const weekEnd = addLocalDays(today, 7);
 
   const filteredTasks = useMemo(() => {
     let list = tasks;
@@ -162,12 +173,9 @@ export default function TasksScreen() {
     }
   }, [tasks, filter, search, today, weekEnd]);
 
-  const inProgress = filteredTasks.filter(
-    (t) => !t.completed && (t.status === 'in_progress' || t.dueDate === today)
-  );
-  const upcoming = filteredTasks.filter(
-    (t) => !t.completed && t.dueDate && t.dueDate > today
-  );
+  const overdue = filteredTasks.filter((t) => taskHealth(t) === 'overdue');
+  const inProgress = filteredTasks.filter((t) => taskHealth(t) === 'inProgress');
+  const upcoming = filteredTasks.filter((t) => taskHealth(t) === 'planned');
   const completed = filteredTasks.filter((t) => t.completed);
 
   return (
@@ -228,6 +236,20 @@ export default function TasksScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.list, { paddingBottom: 100 }]}
       >
+        {overdue.length > 0 && (
+          <>
+            <SectionHeader title="OVERDUE" />
+            {overdue.map((t) => (
+              <TaskRow
+                key={t.id}
+                task={t}
+                onPress={() => router.push({ pathname: '/new-task', params: { id: t.id } })}
+                onToggle={() => toggleComplete(t.id)}
+              />
+            ))}
+          </>
+        )}
+
         {inProgress.length > 0 && (
           <>
             <SectionHeader title="IN PROGRESS" />
@@ -349,7 +371,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 15, textAlign: 'center' },
   fab: {
     position: 'absolute',
-    bottom: 90,
+    bottom: 20,
     right: 20,
     width: 54,
     height: 54,

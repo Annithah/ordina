@@ -42,6 +42,8 @@ npm start
 
 Scan the QR code with **Expo Go**. If port 8081 is busy, choose the next port.
 
+If a phone cannot open the QR code, run `npm run start:phone` from `frontend-ordina` and scan the newly generated code. On iPhone with SDK 57, sign in to the same Expo account in both Expo Go and the terminal's Expo CLI. Android users should scan from Expo Go's built-in QR scanner. A physical phone also needs a reachable API address: set `EXPO_PUBLIC_API_URL` to `http://YOUR_COMPUTER_LAN_IP:4000` (not `localhost`) and restart Expo.
+
 | Device | `EXPO_PUBLIC_API_URL` in `frontend-ordina/.env` |
 | --- | --- |
 | Same computer / iOS simulator | `http://localhost:4000` |
@@ -57,15 +59,24 @@ The **mobile app never holds the Gemini key**. The API calls Gemini.
 | Variable | Where | Purpose |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | `backend-ordina/.env` | Natural-language, voice transcription, image → task |
-| `GEMINI_MODEL` | same file | Default `gemini-2.0-flash` |
+| `GEMINI_MODEL` | same file | Default `gemini-3.8-flash` (with automatic fallbacks) |
 | `JWT_SECRET` | same file | Sign-in tokens |
-| `GOOGLE_CLIENT_ID` | same file | Verify Google ID tokens (same Web client as the app) |
-| `APPLE_CLIENT_ID` | same file | Verify Sign in with Apple (bundle id or Services ID) |
+| `GOOGLE_CLIENT_ID` | same file | Verify Google ID tokens from the Web OAuth client |
+| `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID` | same file | Verify native Google ID tokens |
+| `APPLE_CLIENT_ID`, `APPLE_BUNDLE_ID` | same file | Verify Sign in with Apple |
 | `SMTP_HOST` | same file | Send password-reset codes by email |
 | `DATABASE_URL` | same file | SQLite file, default `file:./data/ordina.sqlite` |
-| `EXPO_PUBLIC_GOOGLE_CLIENT_ID` | `frontend-ordina/.env` | Google sign-in in Expo Go |
+| `EXPO_PUBLIC_GOOGLE_CLIENT_ID` | `frontend-ordina/.env` | Google Web OAuth client for sign-in and Calendar |
+| `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` | same file | Native Google OAuth clients for sign-in and Calendar |
 
 If Gemini is missing or down, ORDINA still plans with its built-in parser (multiple tasks, relative dates, reschedule, arrival reminders). Voice transcription and image → task **require** `GEMINI_API_KEY`. Confirm is always required before tasks are written. Without SMTP, forgot-password still works: the 6-digit code is shown in the app.
+
+### Before publishing integrations
+
+- Google sign-in and Calendar require OAuth clients for the Web, iOS (`com.ordina.app`), and Android (`com.ordina.app`) platforms in the same Google Cloud project. Enable the Google Calendar API. Configure the OAuth consent screen and add the Calendar Events scope (`https://www.googleapis.com/auth/calendar.events`); while the app is in testing, add test users. Google may require consent-screen verification before public use of Calendar scopes.
+- Set matching public client IDs in `frontend-ordina/.env` and private verification client IDs in `backend-ordina/.env`. Never put provider secrets in the Expo app.
+- Apple sign-in requires the Apple capability and matching bundle identifier (`com.ordina.app`), plus the backend Apple audience configuration.
+- Local task notifications need a native development/production build. Android Expo Go does not support the app's scheduled reminders. Voice transcription requires a working backend `GEMINI_API_KEY`; typing task requests continues to work without it.
 
 ### Example
 
@@ -127,3 +138,11 @@ See `backend-ordina/DATABASE.md`. Do not wipe production data; only additive Pri
 ## Design
 
 Figma: [ORDINA_APP](https://www.figma.com/design/SCVeMG4DD2DVHn5QAk3gbW/ORDINA_APP?node-id=0-1)
+
+## Publishing to Google Play
+
+1. **Host the API** on a public HTTPS server (Render, Railway, Fly.io, a VPS…). Set `GEMINI_API_KEY`, `JWT_SECRET` (long random value), Google client IDs and `DATABASE_URL`. For production use a persistent volume for SQLite or a hosted libSQL/Turso URL.
+2. In `frontend-ordina/.env` set `EXPO_PUBLIC_API_URL=https://your-api-domain`, the Google client IDs, and `EXPO_PUBLIC_PRIVACY_POLICY_URL`.
+3. In Google Cloud, create the **Android** OAuth client for package `com.ordina.app` with the SHA-1 of the Play **app signing** key (Play Console → App integrity), and submit the consent screen (Calendar scope) for verification.
+4. Build and submit: `npx eas-cli build -p android --profile production`, then `npx eas-cli submit -p android --profile production` (uploads a draft to the internal testing track).
+5. In Play Console complete Data safety (contacts names/numbers matched on-device, audio/photos/videos sent to the API for AI processing, calendar via Google), add the privacy policy URL, and give reviewers a test account (email sign-in remains available under “Use email instead”). Account deletion is in **Profile → Delete account**.

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
+import { Alert } from 'react-native';
 
 import { api } from '@/services/api';
+import { cancelTaskReminder } from '@/services/notifications';
 
 export type Priority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed';
@@ -20,8 +22,11 @@ export interface Task {
   duration?: string; // "1h 30m"
   reminder?: boolean;
   recurrence?: 'none' | 'daily' | 'weekly' | 'monthly' | 'custom';
+  recurrenceRule?: string;
   goalId?: string;
   parentTaskId?: string;
+  contactName?: string;
+  contactPhone?: string;
   completed: boolean;
   createdAt: string;
   updatedAt: string;
@@ -31,10 +36,11 @@ interface TasksState {
   tasks: Task[];
   loadTasks: () => Promise<void>;
   getTaskById: (id: string) => Task | undefined;
-  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>;
+  addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>;
   updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   toggleComplete: (id: string) => Promise<void>;
+  toggleInProgress: (id: string) => Promise<void>;
 }
 
 function generateId(): string {
@@ -56,8 +62,11 @@ function normalizeTask(task: any): Task {
     duration: task.duration ?? '1h',
     reminder: task.reminder ?? false,
     recurrence: task.recurrence ?? 'none',
+    recurrenceRule: task.recurrenceRule ?? undefined,
     goalId: task.goalId ? String(task.goalId) : undefined,
     parentTaskId: task.parentTaskId ? String(task.parentTaskId) : undefined,
+    contactName: task.contactName ?? undefined,
+    contactPhone: task.contactPhone ?? undefined,
     completed: Boolean(task.completed),
     createdAt: task.createdAt ?? new Date().toISOString(),
     updatedAt: task.updatedAt ?? new Date().toISOString(),
@@ -80,8 +89,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   },
 
   addTask: async (taskData) => {
-    await api.post('/api/tasks', taskData);
+    const { data } = await api.post('/api/tasks', taskData);
     await get().loadTasks();
+    return normalizeTask(data.task);
   },
 
   updateTask: async (id, updates) => {
@@ -95,12 +105,46 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   deleteTask: async (id) => {
     await api.delete(`/api/tasks/${id}`);
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
+    try {
+      await cancelTaskReminder(id);
+    } catch (error) {
+      Alert.alert(
+        'Task deleted',
+        error instanceof Error
+          ? `The task was deleted, but its scheduled notification could not be canceled: ${error.message}`
+          : 'The task was deleted, but its scheduled notification could not be canceled.',
+      );
+    }
   },
 
   toggleComplete: async (id) => {
     const task = get().tasks.find((item) => item.id === id);
     if (!task) return;
     await api.patch(`/api/tasks/${id}/complete`, { completed: !task.completed });
+    if (!task.completed) {
+      try {
+        await cancelTaskReminder(id);
+      } catch (error) {
+        Alert.alert(
+          'Task completed',
+          error instanceof Error
+            ? `The task was completed, but its scheduled notification could not be canceled: ${error.message}`
+            : 'The task was completed, but its scheduled notification could not be canceled.',
+        );
+      }
+    }
     await get().loadTasks();
+  },
+
+  toggleInProgress: async (id) => {
+    const task = get().tasks.find((item) => item.id === id);
+    if (!task || task.completed) return;
+    const status = task.status === 'in_progress' ? 'todo' : 'in_progress';
+    set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? { ...item, status } : item)) }));
+    try {
+      await api.patch(`/api/tasks/${id}`, { status });
+    } finally {
+      await get().loadTasks();
+    }
   },
 }));
