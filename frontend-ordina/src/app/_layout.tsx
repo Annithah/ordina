@@ -9,6 +9,7 @@ import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Stac
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 
+import { ToastHost } from '@/components/toast';
 import { ThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import { I18nProvider } from '@/providers/i18n-provider';
 import { useArrivalWatch } from '@/services/arrival-watch';
@@ -47,6 +48,7 @@ function RootStack() {
         <Stack.Screen name="reminders" />
         <Stack.Screen name="integrations" />
       </Stack>
+      <ToastHost />
     </NavigationThemeProvider>
   );
 }

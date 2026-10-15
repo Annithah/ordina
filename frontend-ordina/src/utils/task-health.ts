@@ -36,6 +36,20 @@ export function taskHealth(task: Task, now = new Date()): TaskHealth {
   return 'planned';
 }
 
+/** The three states the task list shows: pending, completed, or overdue. */
+export type TaskStatusLabel = 'pending' | 'completed' | 'overdue';
+
+export function taskStatus(task: Task, now = new Date()): TaskStatusLabel {
+  const health = taskHealth(task, now);
+  return health === 'completed' || health === 'overdue' ? health : 'pending';
+}
+
+export const STATUS_LABEL: Record<TaskStatusLabel, string> = {
+  pending: 'Pending',
+  completed: 'Completed',
+  overdue: 'Overdue',
+};
+
 export function healthColor(health: TaskHealth, theme: { success: string; warning: string; danger: string; textSecondary: string }) {
   switch (health) {
     case 'completed':

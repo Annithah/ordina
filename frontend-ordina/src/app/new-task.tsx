@@ -3,6 +3,7 @@ import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from 
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -15,9 +16,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ContactActions } from '@/components/contact-actions';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/notifications';
 import { useAuthStore } from '@/store/auth-store';
@@ -36,6 +39,7 @@ import {
   plannedMinutes,
   timeFromMinutes,
 } from '@/utils/task-planning';
+import { DESCRIPTION_MAX, TITLE_MAX, friendlyError, validateTaskForm, type TaskFieldErrors } from '@/utils/task-validation';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -53,6 +57,9 @@ const PRIORITIES: { id: Priority; label: string; color: string }[] = [
   { id: 'medium', label: 'Medium', color: '#F59E0B' },
   { id: 'high', label: 'High', color: '#EF4444' },
 ];
+
+// The date/time picker is native-only; the web build keeps the preset chips.
+const HAS_NATIVE_PICKER = Platform.OS === 'android' || Platform.OS === 'ios';
 
 const DURATIONS = [15, 30, 45, 60, 90, 120, 180];
 
@@ -129,13 +136,51 @@ function Chip({ label, active, onPress, color, icon }: {
 
 export default function NewTaskScreen() {
   const theme = useTheme();
-  const isSignedIn = useAuthStore((s) => s.isSignedIn);
   const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string }>();
   const presetDate = typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : undefined;
   const presetTime = typeof params.time === 'string' && /^\d{2}:\d{2}$/.test(params.time) ? params.time : undefined;
-  const { tasks, addTask, updateTask, deleteTask } = useTasksStore();
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
+  const tasks = useTasksStore((s) => s.tasks);
+  const loadTasks = useTasksStore((s) => s.loadTasks);
   const taskToEdit = useMemo(() => tasks.find((task) => task.id === taskId), [tasks, taskId]);
+  const [lookupDone, setLookupDone] = useState(false);
+
+  // Opened directly (e.g. after a restart): fetch the list before deciding the task is missing.
+  useEffect(() => {
+    if (!taskId || taskToEdit) return;
+    let alive = true;
+    void loadTasks().finally(() => {
+      if (alive) setLookupDone(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [taskId, taskToEdit, loadTasks]);
+
+  if (taskId && !taskToEdit) {
+    return (
+      <SafeAreaView style={[styles.safe, styles.center, { backgroundColor: theme.background }]}>
+        {lookupDone ? (
+          <>
+            <ThemedText style={styles.headerTitle}>Task not found</ThemedText>
+            <ThemedText themeColor="textSecondary">It may have been deleted.</ThemedText>
+            <View style={{ width: 220 }}>
+              <PrimaryButton label="Back to tasks" onPress={() => router.back()} />
+            </View>
+          </>
+        ) : (
+          <ActivityIndicator color={theme.primary} />
+        )}
+      </SafeAreaView>
+    );
+  }
+  return <TaskForm key={taskToEdit?.id ?? 'new'} taskToEdit={taskToEdit} presetDate={presetDate} presetTime={presetTime} />;
+}
+
+function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; presetDate?: string; presetTime?: string }) {
+  const theme = useTheme();
+  const isSignedIn = useAuthStore((s) => s.isSignedIn);
+  const { tasks, addTask, updateTask, deleteTask } = useTasksStore();
   const isEditMode = Boolean(taskToEdit);
 
   const [title, setTitle] = useState(taskToEdit?.title ?? '');
@@ -145,29 +190,22 @@ export default function NewTaskScreen() {
   const [dueDate, setDueDate] = useState(taskToEdit?.dueDate ?? presetDate ?? localDateKey());
   const [startTime, setStartTime] = useState(taskToEdit?.startTime ?? presetTime ?? '');
   const [minutes, setMinutes] = useState(durationToMinutes(taskToEdit?.duration ?? '1h'));
-  const [repeatId, setRepeatId] = useState('none');
+  const [repeatId, setRepeatId] = useState(() => {
+    if (!taskToEdit) return 'none';
+    const repeat = REPEATS.find((item) => item.recurrence === taskToEdit.recurrence
+      && (item.rule ?? undefined) === (taskToEdit.recurrence === 'custom' ? taskToEdit.recurrenceRule : undefined));
+    return repeat?.id ?? 'none';
+  });
   const [reminderLead, setReminderLead] = useState<number | null>(taskToEdit?.reminder ? 10 : null);
   const [contact, setContact] = useState<{ name: string; phone?: string } | null>(
     taskToEdit?.contactName ? { name: taskToEdit.contactName, phone: taskToEdit.contactPhone } : null,
   );
   const [iosPicker, setIosPicker] = useState<null | 'date' | 'time'>(null);
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!taskToEdit) return;
-    setTitle(taskToEdit.title);
-    setNotes(taskToEdit.description ?? '');
-    setPriority(taskToEdit.priority);
-    setCategory(taskToEdit.category);
-    setDueDate(taskToEdit.dueDate ?? localDateKey());
-    setStartTime(taskToEdit.startTime ?? '');
-    setMinutes(durationToMinutes(taskToEdit.duration));
-    setReminderLead(taskToEdit.reminder ? 10 : null);
-    setContact(taskToEdit.contactName ? { name: taskToEdit.contactName, phone: taskToEdit.contactPhone } : null);
-    const repeat = REPEATS.find((item) => item.recurrence === taskToEdit.recurrence
-      && (item.rule ?? undefined) === (taskToEdit.recurrence === 'custom' ? taskToEdit.recurrenceRule : undefined));
-    setRepeatId(repeat?.id ?? 'none');
-  }, [taskToEdit]);
+  const [errors, setErrors] = useState<TaskFieldErrors>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const detected = useMemo(() => detectSchedule(title), [title]);
   const clashes = useMemo(
@@ -257,10 +295,11 @@ export default function NewTaskScreen() {
   }
 
   async function saveTask() {
-    if (!title.trim() || saving) {
-      if (!title.trim()) Alert.alert('Task', 'Give your task a name first.');
-      return;
-    }
+    if (saving) return;
+    const found = validateTaskForm({ title, description: notes, dueDate, startTime, durationMinutes: minutes });
+    setErrors(found);
+    setSaveError(null);
+    if (Object.keys(found).length) return;
     if (!isSignedIn) {
       router.replace('/sign-in');
       return;
@@ -290,48 +329,46 @@ export default function NewTaskScreen() {
       else savedTaskId = (await addTask(payload)).id;
     } catch (error: any) {
       setSaving(false);
-      if (error?.response?.status === 401) {
-        Alert.alert('Session expired', 'Please sign in again to save this task.', [
-          { text: 'Sign in', onPress: () => router.replace('/sign-in') },
-          { text: 'Cancel', style: 'cancel' },
-        ]);
-        return;
-      }
-      Alert.alert('Task', error?.response?.data?.message || error?.message || 'Unable to save the task.');
+      const serverErrors = error?.response?.data?.errors;
+      if (serverErrors && typeof serverErrors === 'object') setErrors(serverErrors);
+      setSaveError(friendlyError(error, 'Unable to save the task. Please try again.'));
       return;
     }
 
     if (savedTaskId) {
-      try {
-        if (reminderLead !== null) {
+      // The task is saved. Local notifications are best-effort and must never hold up saving.
+      const id = savedTaskId;
+      const reminder = reminderLead !== null
+        ? (() => {
           const start = dateFromKey(dueDate, startTime || '09:00');
           const when = new Date(start.getTime() - reminderLead * 60_000);
-          await scheduleTaskReminder(savedTaskId, payload.title, when.getTime() > Date.now() ? when : start, {
+          return scheduleTaskReminder(id, payload.title, when.getTime() > Date.now() ? when : start, {
             body: startTime
               ? `${friendlyDay(dueDate)} at ${formatTime12(startTime)}${contact ? ` · ${contact.name}` : ''}`
               : `Planned for ${friendlyDay(dueDate).toLowerCase()}`,
           });
-        } else {
-          await cancelTaskReminder(savedTaskId);
-        }
-      } catch {
-        // The task is saved; a missing local notification should not block the user.
-      }
+        })()
+        : cancelTaskReminder(id);
+      void Promise.resolve(reminder).catch(() => undefined);
     }
     setSaving(false);
+    toast.success(isEditMode ? 'Changes saved' : 'Task added to your plan');
     router.back();
   }
 
-  function confirmDelete() {
-    if (!taskToEdit) return;
-    Alert.alert('Delete task?', `“${taskToEdit.title}” will be removed.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => void deleteTask(taskToEdit.id).then(() => router.back()),
-      },
-    ]);
+  async function removeTask() {
+    if (!taskToEdit || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteTask(taskToEdit.id);
+      setConfirmingDelete(false);
+      toast.success('Task deleted');
+      router.back();
+    } catch (error) {
+      setDeleting(false);
+      setConfirmingDelete(false);
+      toast.error(friendlyError(error, 'Could not delete the task. Please try again.'));
+    }
   }
 
   const summary = [
@@ -348,7 +385,7 @@ export default function NewTaskScreen() {
         </Pressable>
         <ThemedText style={styles.headerTitle}>{isEditMode ? 'Edit task' : 'New task'}</ThemedText>
         {isEditMode ? (
-          <Pressable accessibilityLabel="Delete task" onPress={confirmDelete} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+          <Pressable accessibilityLabel="Delete task" onPress={() => setConfirmingDelete(true)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
             <Ionicons name="trash-outline" size={18} color={theme.danger} />
           </Pressable>
         ) : (
@@ -361,13 +398,21 @@ export default function NewTaskScreen() {
           <View style={[styles.titleCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <TextInput
               value={title}
-              onChangeText={setTitle}
+              onChangeText={(text) => {
+                setTitle(text);
+                if (errors.title) setErrors(({ title: _cleared, ...rest }) => rest);
+              }}
               placeholder="What do you need to do?"
               placeholderTextColor={theme.textSecondary}
+              accessibilityLabel="Task title"
               autoFocus={!isEditMode}
+              maxLength={TITLE_MAX}
               multiline
               style={[styles.titleInput, { color: theme.text }]}
             />
+            {errors.title ? (
+              <ThemedText accessibilityRole="alert" style={[styles.fieldError, { color: theme.danger }]}>{errors.title}</ThemedText>
+            ) : null}
             {detected && (detected.date !== dueDate || (detected.time && detected.time !== startTime)) ? (
               <Pressable onPress={applyDetected} style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="flash" size={14} color={theme.primary} />
@@ -384,8 +429,10 @@ export default function NewTaskScreen() {
             <TextInput
               value={notes}
               onChangeText={setNotes}
-              placeholder="Add notes"
+              placeholder="Add a description (optional)"
               placeholderTextColor={theme.textSecondary}
+              accessibilityLabel="Task description"
+              maxLength={DESCRIPTION_MAX}
               multiline
               style={[styles.notesInput, { color: theme.text, borderTopColor: theme.border }]}
             />
@@ -403,24 +450,32 @@ export default function NewTaskScreen() {
               {dateOptions.map((item) => (
                 <Chip key={item.label} label={item.label} active={dueDate === item.value} onPress={() => setDueDate(item.value)} />
               ))}
-              <Chip
-                label={dateOptions.some((item) => item.value === dueDate) ? 'Pick date' : friendlyDay(dueDate)}
-                icon="calendar"
-                active={!dateOptions.some((item) => item.value === dueDate)}
-                onPress={() => openPicker('date')}
-              />
+              {HAS_NATIVE_PICKER ? (
+                <Chip
+                  label={dateOptions.some((item) => item.value === dueDate) ? 'Pick date' : friendlyDay(dueDate)}
+                  icon="calendar"
+                  active={!dateOptions.some((item) => item.value === dueDate)}
+                  onPress={() => openPicker('date')}
+                />
+              ) : !dateOptions.some((item) => item.value === dueDate) ? (
+                <Chip label={friendlyDay(dueDate)} icon="calendar" active onPress={() => undefined} />
+              ) : null}
             </ScrollView>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
               <Chip label="Any time" active={!startTime} onPress={() => setStartTime('')} />
               {timeOptions.map((item) => (
                 <Chip key={item.label} label={item.label} active={startTime === item.value} onPress={() => setStartTime(item.value)} />
               ))}
-              <Chip
-                label={startTime && !timeOptions.some((item) => item.value === startTime) ? formatTime12(startTime) : 'Pick time'}
-                icon="time-outline"
-                active={Boolean(startTime) && !timeOptions.some((item) => item.value === startTime)}
-                onPress={() => openPicker('time')}
-              />
+              {HAS_NATIVE_PICKER ? (
+                <Chip
+                  label={startTime && !timeOptions.some((item) => item.value === startTime) ? formatTime12(startTime) : 'Pick time'}
+                  icon="time-outline"
+                  active={Boolean(startTime) && !timeOptions.some((item) => item.value === startTime)}
+                  onPress={() => openPicker('time')}
+                />
+              ) : startTime && !timeOptions.some((item) => item.value === startTime) ? (
+                <Chip label={formatTime12(startTime)} icon="time-outline" active onPress={() => undefined} />
+              ) : null}
             </ScrollView>
 
             <View style={[styles.load, { backgroundColor: theme.backgroundElement }]}>
@@ -539,6 +594,11 @@ export default function NewTaskScreen() {
         </ScrollView>
 
         <View style={[styles.footer, { backgroundColor: theme.background, borderTopColor: theme.border }]}>
+          {saveError || Object.keys(errors).some((key) => key !== 'title') ? (
+            <ThemedText accessibilityRole="alert" style={[styles.fieldError, { color: theme.danger, textAlign: 'center' }]}>
+              {saveError ?? Object.entries(errors).find(([key]) => key !== 'title')?.[1]}
+            </ThemedText>
+          ) : null}
           <ThemedText themeColor="textSecondary" style={styles.summary} numberOfLines={1}>
             {summary}
             {reminderLead !== null ? ' · 🔔' : ''}
@@ -546,11 +606,22 @@ export default function NewTaskScreen() {
           </ThemedText>
           <PrimaryButton
             label={saving ? 'Saving…' : isEditMode ? 'Save changes' : 'Create task'}
-            disabled={saving || !title.trim()}
+            disabled={saving}
             onPress={() => void saveTask()}
           />
         </View>
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={confirmingDelete}
+        title="Delete this task?"
+        message={`“${taskToEdit?.title ?? ''}” will be removed from your plan. This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        busy={deleting}
+        onConfirm={() => void removeTask()}
+        onCancel={() => setConfirmingDelete(false)}
+      />
 
       {Platform.OS === 'ios' ? (
         <Modal transparent visible={iosPicker !== null} animationType="fade" onRequestClose={() => setIosPicker(null)}>
@@ -579,9 +650,11 @@ export default function NewTaskScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
+  center: { alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
+  fieldError: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
   headerTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
-  iconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   form: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
   titleCard: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 8 },
   titleInput: { fontSize: 20, fontFamily: 'Poppins_600SemiBold', paddingVertical: 4, minHeight: 36 },

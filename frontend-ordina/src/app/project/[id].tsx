@@ -4,10 +4,12 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
 import { useProjectsStore } from '@/store/projects-store';
 import { useTasksStore } from '@/store/tasks-store';
 import { href } from '@/utils/href';
+import { friendlyError } from '@/utils/task-validation';
 
 export default function ProjectDetailScreen() {
   const theme = useTheme();
@@ -111,7 +113,7 @@ export default function ProjectDetailScreen() {
         {projectTasks.map((task) => (
           <View key={task.id} style={[styles.task, { backgroundColor: theme.card }]}>
             <Pressable
-              onPress={() => toggleComplete(task.id)}
+              onPress={() => void toggleComplete(task.id).catch((error) => toast.error(friendlyError(error, 'Could not update the task.')))}
               style={[
                 styles.box,
                 {

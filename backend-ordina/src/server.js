@@ -11,6 +11,7 @@ const { sendMail } = require('./lib/mail');
 const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
 const ai = require('./lib/ai');
 const schedule = require('./lib/schedule');
+const taskValidation = require('./lib/task-validation');
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -648,11 +649,12 @@ function taskPayload(body, userId, existing = {}) {
         ? 'completed'
         : existing.status || 'pending';
 
+  const status = body.completed ? 'completed' : normalizedStatus;
   return {
     userId,
     title: String(body.title ?? existing.title ?? '').trim(),
     description: body.description ?? existing.description ?? null,
-    status: body.completed ? 'completed' : normalizedStatus,
+    status,
     priority: taskPriority(body.priority ?? existing.priority),
     dueAt: taskDate(body.dueDate ?? (existing.dueAt && existing.dueAt.toISOString().slice(0, 10))),
     projectId,
@@ -664,8 +666,28 @@ function taskPayload(body, userId, existing = {}) {
     reminderEnabled: body.reminder === undefined ? Boolean(existing.reminderEnabled) : Boolean(body.reminder),
     contactName: body.contactName === undefined ? existing.contactName ?? null : body.contactName || null,
     contactPhone: body.contactPhone === undefined ? existing.contactPhone ?? null : body.contactPhone || null,
-    completedAt: body.completed ? new Date() : null,
+    // Editing a completed task must not reset when it was completed.
+    completedAt: status === 'completed' ? existing.completedAt ?? new Date() : null,
   };
+}
+
+const TASK_INCLUDE = { categories: { include: { category: true } } };
+
+/** Stores the task's single category through the existing categories / task_categories tables. */
+async function setTaskCategory(userId, taskId, category) {
+  if (category === undefined) return;
+  await prisma.taskCategory.deleteMany({ where: { taskId } });
+  if (!category) return;
+  const row = await prisma.category.upsert({
+    where: { userId_name: { userId, name: category } },
+    update: {},
+    create: { userId, name: category },
+  });
+  await prisma.taskCategory.create({ data: { taskId, categoryId: row.id } });
+}
+
+function validationFailure(res, errors) {
+  return res.status(400).json({ message: taskValidation.firstError(errors), errors });
 }
 
 app.post('/api/ai/interpret', async (req, res) => {
@@ -901,34 +923,48 @@ app.post('/api/ai/schedule', async (req, res) => {
 app.post('/api/tasks', async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+  const { value, errors } = taskValidation.validateTaskInput(req.body);
+  if (Object.keys(errors).length) return validationFailure(res, errors);
   try {
-    const data = taskPayload(req.body ?? {}, userId);
-    if (!data.title) return res.status(400).json({ message: 'Task title is required.' });
-    const task = await prisma.task.create({ data });
+    const data = taskPayload({ ...req.body, ...value }, userId);
+    const created = await prisma.task.create({ data });
+    await setTaskCategory(userId, created.id, value.category);
     if (data.reminderEnabled && data.dueAt) {
       await prisma.reminder.create({
-        data: { userId, taskId: task.id, title: `Reminder: ${task.title}`, remindAt: data.dueAt, enabled: true, status: 'scheduled' },
+        data: { userId, taskId: created.id, title: `Reminder: ${created.title}`, remindAt: data.dueAt, enabled: true, status: 'scheduled' },
       });
     }
+    const task = await prisma.task.findUnique({ where: { id: created.id }, include: TASK_INCLUDE });
     res.status(201).json({ task: mapTask(task) });
-  } catch (error) { res.status(400).json({ message: 'Unable to create task.', error: error.message }); }
+  } catch (error) {
+    console.error('Create task failed:', error.message);
+    res.status(500).json({ message: 'Unable to create the task. Please try again.' });
+  }
 });
 
 app.patch('/api/tasks/:id', async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
+  const { value, errors } = taskValidation.validateTaskInput(req.body, { partial: true });
+  if (Object.keys(errors).length) return validationFailure(res, errors);
   try {
     const existing = await prisma.task.findFirst({ where: { id: Number(req.params.id), userId } });
     if (!existing) return res.status(404).json({ message: 'Task not found.' });
-    const task = await prisma.task.update({ where: { id: existing.id }, data: taskPayload(req.body ?? {}, userId, existing) });
+    await prisma.task.update({ where: { id: existing.id }, data: taskPayload({ ...req.body, ...value }, userId, existing) });
+    await setTaskCategory(userId, existing.id, value.category);
+    const task = await prisma.task.findUnique({ where: { id: existing.id }, include: TASK_INCLUDE });
     res.json({ task: mapTask(task) });
-  } catch (error) { res.status(400).json({ message: 'Unable to update task.', error: error.message }); }
+  } catch (error) {
+    console.error('Update task failed:', error.message);
+    res.status(500).json({ message: 'Unable to update the task. Please try again.' });
+  }
 });
 
 app.delete('/api/tasks/:id', async (req, res) => {
   const userId = requireUser(req, res);
   if (!userId) return;
-  await prisma.task.deleteMany({ where: { id: Number(req.params.id), userId } });
+  const { count } = await prisma.task.deleteMany({ where: { id: Number(req.params.id), userId } });
+  if (!count) return res.status(404).json({ message: 'Task not found.' });
   res.status(204).end();
 });
 

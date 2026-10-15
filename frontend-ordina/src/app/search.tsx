@@ -4,9 +4,11 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
 import { useProjectsStore } from '@/store/projects-store';
 import { useTasksStore } from '@/store/tasks-store';
+import { friendlyError } from '@/utils/task-validation';
 
 export default function SearchScreen() {
   const theme = useTheme();
@@ -84,7 +86,7 @@ export default function SearchScreen() {
         {matches.map((task) => (
           <View key={task.id} style={[styles.task, { backgroundColor: theme.card }]}>
             <Pressable
-              onPress={() => toggleComplete(task.id)}
+              onPress={() => void toggleComplete(task.id).catch((error) => toast.error(friendlyError(error, 'Could not update the task.')))}
               style={[
                 styles.box,
                 {
