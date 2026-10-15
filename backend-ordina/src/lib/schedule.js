@@ -132,7 +132,80 @@ function overwhelmPlan(tasks) {
   };
 }
 
+function priorityScore(task) {
+  return task.priority === 'high' || task.priority === 3 ? 3 : task.priority === 'medium' || task.priority === 2 ? 2 : 1;
+}
+
+/**
+ * Builds today's schedule: keeps timed tasks where they are, and slots unscheduled,
+ * missed and overdue tasks into the free time left today (highest priority first).
+ * Anything that does not fit moves to tomorrow.
+ */
+function planDay(tasks, today, nowMinutes) {
+  const open = tasks.filter((task) => !task.completed && task.status !== 'completed' && task.status !== 'archived');
+  const fixed = open.filter((task) => task.dueDate === today
+    && minutesFromTime(task.startTime) != null
+    && minutesFromTime(task.startTime) >= nowMinutes);
+  const toPlace = open
+    .filter((task) => !fixed.includes(task) && (!task.dueDate || task.dueDate <= today))
+    .sort((a, b) => {
+      const overdue = Number(Boolean(b.dueDate && b.dueDate < today)) - Number(Boolean(a.dueDate && a.dueDate < today));
+      return priorityScore(b) - priorityScore(a) || overdue;
+    })
+    .slice(0, 12);
+
+  const busy = fixed.map((task) => {
+    const start = minutesFromTime(task.startTime);
+    return { start, end: start + durationMinutes(task.duration) };
+  });
+  const dayEnd = 21 * 60;
+  let cursor = Math.max(8 * 60, Math.ceil(nowMinutes / 15) * 15);
+  const tomorrow = addDays(today, 1);
+  const tomorrowBusy = [];
+  const planned = [];
+
+  for (const task of toPlace) {
+    const need = durationMinutes(task.duration);
+    let slot = null;
+    let start = cursor;
+    while (start + need <= dayEnd) {
+      const hit = busy.find((block) => start < block.end && block.start < start + need);
+      if (!hit) { slot = start; break; }
+      start = hit.end;
+    }
+    let date = today;
+    if (slot == null) {
+      date = tomorrow;
+      const tomorrowTasks = tasks.filter((item) => item.dueDate === tomorrow).concat(tomorrowBusy);
+      slot = minutesFromTime(findOpenSlot(tomorrowTasks, tomorrow, need));
+      tomorrowBusy.push({ dueDate: tomorrow, startTime: timeFromMinutes(slot), duration: `${need}m`, completed: false });
+    } else {
+      busy.push({ start: slot, end: slot + need });
+      cursor = slot + need;
+    }
+    planned.push({
+      id: task.id,
+      title: task.title,
+      description: task.description || '',
+      date,
+      startTime: timeFromMinutes(slot),
+      durationMinutes: need,
+      priority: typeof task.priority === 'number' ? (task.priority >= 3 ? 'high' : task.priority === 2 ? 'medium' : 'low') : task.priority || 'medium',
+      reminder: Boolean(task.reminder),
+      reason: task.dueDate && task.dueDate < today ? 'Overdue' : !task.startTime ? 'Unscheduled' : 'Missed earlier today',
+    });
+  }
+
+  return {
+    planned,
+    fixed: fixed
+      .map((task) => ({ title: task.title, startTime: task.startTime, durationMinutes: durationMinutes(task.duration) }))
+      .sort((a, b) => a.startTime.localeCompare(b.startTime)),
+  };
+}
+
 module.exports = {
+  planDay,
   toDateKey,
   addDays,
   matchesRecurrence,

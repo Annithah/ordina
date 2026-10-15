@@ -3,11 +3,14 @@ require('dotenv/config');
 const assert = require('node:assert/strict');
 const { PrismaLibSql } = require('@prisma/adapter-libsql');
 const { PrismaClient } = require('@prisma/client');
+const { ensureSchema } = require('../src/lib/ensure-schema');
 
 const adapter = new PrismaLibSql({ url: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 async function run() {
+  await ensureSchema(prisma);
+
   const email = `prisma-${process.pid}@example.com`;
   const user = await prisma.user.create({
     data: { email, passwordHash: 'hash', displayName: 'Prisma Test' }

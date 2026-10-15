@@ -20,7 +20,9 @@ app.use(cors({
   origin: true,
   credentials: true,
 }));
-app.use(express.json({ limit: '8mb' }));
+// Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
+app.use('/api/ai', express.json({ limit: '30mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 
 app.use(rateLimit({
@@ -40,7 +42,12 @@ app.get('/api/health', async (_req, res) => {
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
-        googleAuth: Boolean(process.env.GOOGLE_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID),
+        googleAuth: Boolean(
+          process.env.GOOGLE_CLIENT_ID
+            || process.env.GOOGLE_IOS_CLIENT_ID
+            || process.env.GOOGLE_ANDROID_CLIENT_ID
+            || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+        ),
         appleAuth: Boolean(process.env.APPLE_CLIENT_ID || process.env.APPLE_BUNDLE_ID),
         smtp: Boolean(process.env.SMTP_HOST),
       },
@@ -220,6 +227,31 @@ app.post('/api/auth/reset', async (req, res) => {
     return res.json({ ok: true, message: 'Password updated. You can sign in with the new password.' });
   } catch (error) {
     return res.status(500).json({ message: 'Unable to reset password.', error: error.message });
+  }
+});
+
+app.delete('/api/auth/account', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    // Delete explicitly so removal does not depend on SQLite foreign-key enforcement.
+    await prisma.$transaction([
+      prisma.taskCategory.deleteMany({ where: { task: { userId } } }),
+      prisma.reminder.deleteMany({ where: { userId } }),
+      prisma.notification.deleteMany({ where: { userId } }),
+      prisma.aiMessage.deleteMany({ where: { userId } }),
+      prisma.passwordReset.deleteMany({ where: { userId } }),
+      prisma.place.deleteMany({ where: { userId } }),
+      prisma.task.updateMany({ where: { userId }, data: { parentTaskId: null } }),
+      prisma.task.deleteMany({ where: { userId } }),
+      prisma.goal.deleteMany({ where: { userId } }),
+      prisma.project.deleteMany({ where: { userId } }),
+      prisma.category.deleteMany({ where: { userId } }),
+      prisma.user.delete({ where: { id: userId } }),
+    ]);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
   }
 });
 
@@ -488,7 +520,10 @@ function mapTask(task) {
     startTime: task.startTime || undefined,
     duration: task.duration || undefined,
     recurrence: task.recurrence || 'none',
+    recurrenceRule: task.recurrenceRule || undefined,
     reminder: Boolean(task.reminderEnabled),
+    contactName: task.contactName || undefined,
+    contactPhone: task.contactPhone || undefined,
     completed: task.status === 'completed',
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
@@ -536,6 +571,24 @@ async function notify(userId, title, message, type, relatedType, relatedId) {
   });
 }
 
+/** Recent chat (last 3 hours) so ORDINA can understand answers to its own questions. */
+async function recentConversation(userId) {
+  const rows = await prisma.aiMessage.findMany({
+    where: { userId, createdAt: { gte: new Date(Date.now() - 3 * 60 * 60 * 1000) } },
+    orderBy: { createdAt: 'desc' },
+    take: 10,
+  });
+  return rows.reverse().map((row) => {
+    let actions = null;
+    try {
+      actions = row.actions ? JSON.parse(row.actions) : null;
+    } catch {
+      actions = null;
+    }
+    return { role: row.role, content: row.content, actions };
+  });
+}
+
 async function ownedTasks(userId) {
   const rows = await prisma.task.findMany({
     where: { userId },
@@ -547,13 +600,31 @@ async function ownedTasks(userId) {
     .map(mapTask);
 }
 
+function calendarBusyTasks(events) {
+  if (!Array.isArray(events)) return [];
+  return events.slice(0, 100).flatMap((event) => {
+    const date = String(event?.date || '');
+    const startTime = String(event?.startTime || '');
+    const durationMinutes = Number(event?.durationMinutes);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startTime)) return [];
+    if (!Number.isFinite(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) return [];
+    return [{
+      title: String(event?.title || 'Google Calendar event').slice(0, 200),
+      dueDate: date,
+      startTime,
+      duration: `${durationMinutes}m`,
+      completed: false,
+    }];
+  });
+}
+
 function taskPriority(value) {
   return value === 'high' || value === 3 ? 3 : value === 'medium' || value === 2 ? 2 : 1;
 }
 
-function taskDate(dueDate, startTime) {
+function taskDate(dueDate) {
   if (!dueDate) return null;
-  const value = `${dueDate}${startTime ? `T${startTime}:00` : 'T12:00:00'}`;
+  const value = `${dueDate}T12:00:00.000Z`;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -567,13 +638,23 @@ function taskPayload(body, userId, existing = {}) {
   if (body.goalId !== undefined) {
     goalId = body.goalId && Number(body.goalId) > 0 ? Number(body.goalId) : null;
   }
+
+  const requestedStatus = body.status ?? existing.status ?? 'pending';
+  const normalizedStatus = requestedStatus === 'todo' || requestedStatus === 'pending'
+    ? 'pending'
+    : requestedStatus === 'in_progress'
+      ? 'in_progress'
+      : requestedStatus === 'completed'
+        ? 'completed'
+        : existing.status || 'pending';
+
   return {
     userId,
     title: String(body.title ?? existing.title ?? '').trim(),
     description: body.description ?? existing.description ?? null,
-    status: body.completed ? 'completed' : body.status === 'in_progress' ? 'in_progress' : body.status === 'completed' ? 'completed' : existing.status || 'pending',
+    status: body.completed ? 'completed' : normalizedStatus,
     priority: taskPriority(body.priority ?? existing.priority),
-    dueAt: taskDate(body.dueDate ?? (existing.dueAt && existing.dueAt.toISOString().slice(0, 10)), body.startTime ?? existing.startTime),
+    dueAt: taskDate(body.dueDate ?? (existing.dueAt && existing.dueAt.toISOString().slice(0, 10))),
     projectId,
     goalId,
     startTime: body.startTime ?? existing.startTime ?? null,
@@ -581,6 +662,8 @@ function taskPayload(body, userId, existing = {}) {
     recurrence: body.recurrence ?? existing.recurrence ?? 'none',
     recurrenceRule: body.recurrenceRule ?? existing.recurrenceRule ?? null,
     reminderEnabled: body.reminder === undefined ? Boolean(existing.reminderEnabled) : Boolean(body.reminder),
+    contactName: body.contactName === undefined ? existing.contactName ?? null : body.contactName || null,
+    contactPhone: body.contactPhone === undefined ? existing.contactPhone ?? null : body.contactPhone || null,
     completedAt: body.completed ? new Date() : null,
   };
 }
@@ -592,12 +675,16 @@ app.post('/api/ai/interpret', async (req, res) => {
   if (!message) return res.status(400).json({ message: 'A message is required.' });
   try {
     await materializeRecurrence(userId);
-    const existingTasks = await ownedTasks(userId);
+    const existingTasks = [
+      ...await ownedTasks(userId),
+      ...calendarBusyTasks(req.body?.calendarEvents),
+    ];
     const result = await ai.interpret({
       message,
       timezone: req.body?.timezone,
       existingTasks,
       contacts: req.body?.contacts,
+      conversation: await recentConversation(userId),
     });
     await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
     await prisma.aiMessage.create({
@@ -609,21 +696,28 @@ app.post('/api/ai/interpret', async (req, res) => {
   }
 });
 
-app.post('/api/ai/from-image', async (req, res) => {
+async function interpretMediaRoute(req, res) {
   const userId = requireUser(req, res);
   if (!userId) return;
-  const image = String(req.body?.image || '').trim();
-  if (!image) return res.status(400).json({ message: 'An image is required.' });
+  const media = String(req.body?.media || req.body?.image || '').trim();
+  if (!media) return res.status(400).json({ message: 'An image or video is required.' });
+  const mimeType = String(req.body?.mimeType || 'image/jpeg');
+  if (!/^(image|video)\//.test(mimeType)) return res.status(400).json({ message: 'Only images and videos are supported.' });
   try {
     await materializeRecurrence(userId);
-    const existingTasks = await ownedTasks(userId);
-    const result = await ai.interpretImage({
-      image,
-      mimeType: req.body?.mimeType,
+    const existingTasks = [
+      ...await ownedTasks(userId),
+      ...calendarBusyTasks(req.body?.calendarEvents),
+    ];
+    const result = await ai.interpretMedia({
+      media,
+      mimeType,
+      note: req.body?.note,
       timezone: req.body?.timezone,
       existingTasks,
     });
-    await prisma.aiMessage.create({ data: { userId, role: 'user', content: '[image]' } });
+    const label = mimeType.startsWith('video/') ? '[video]' : '[image]';
+    await prisma.aiMessage.create({ data: { userId, role: 'user', content: req.body?.note ? `${label} ${req.body.note}` : label } });
     await prisma.aiMessage.create({
       data: { userId, role: 'assistant', content: result.message || '', actions: JSON.stringify(result) },
     });
@@ -631,7 +725,10 @@ app.post('/api/ai/from-image', async (req, res) => {
   } catch (error) {
     return res.status(error.status || 500).json({ message: error.message });
   }
-});
+}
+
+app.post('/api/ai/from-media', interpretMediaRoute);
+app.post('/api/ai/from-image', interpretMediaRoute);
 
 app.post('/api/ai/transcribe', async (req, res) => {
   const userId = requireUser(req, res);
@@ -651,18 +748,58 @@ app.post('/api/ai/confirm', async (req, res) => {
   const reschedule = req.body?.reschedule;
   const arrivalReminders = req.body?.arrivalReminders || [];
   try {
+    const availablePlaces = arrivalReminders.length
+      ? await prisma.place.findMany({ where: { userId } })
+      : [];
+    const resolvedArrivalPlaces = arrivalReminders.map((item) => {
+      const needle = String(item.placeName || item.place || '').toLowerCase().trim();
+      return availablePlaces.find((row) => {
+        const name = String(row.name || '').toLowerCase();
+        return name === needle || name.includes(needle) || needle.includes(name);
+      });
+    });
+    if (resolvedArrivalPlaces.some((place) => !place)) {
+      const missing = resolvedArrivalPlaces.findIndex((place) => !place);
+      const item = arrivalReminders[missing];
+      return res.status(400).json({
+        message: `Save a place named “${item.placeName || 'home or work'}” in Integrations first, then confirm again.`,
+      });
+    }
     const created = [];
+    const rescheduled = [];
     for (const item of actions) {
+      const duration = item.durationMinutes
+        ? `${Math.floor(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m`
+        : item.duration;
+      // Plans ("plan my day/week") reorganize tasks the user already has: move them instead of duplicating.
+      const existingTask = item.id
+        ? await prisma.task.findFirst({ where: { id: Number(item.id), userId } })
+        : null;
+      if (existingTask) {
+        const updated = await prisma.task.update({
+          where: { id: existingTask.id },
+          data: {
+            dueAt: taskDate(item.date) ?? existingTask.dueAt,
+            startTime: item.startTime || existingTask.startTime,
+            duration: duration || existingTask.duration,
+          },
+          include: { categories: { include: { category: true } } },
+        });
+        rescheduled.push(mapTask(updated));
+        continue;
+      }
       const task = await prisma.task.create({
         data: taskPayload({
           title: item.title,
           description: item.description,
           dueDate: item.date,
           startTime: item.startTime,
-          duration: item.durationMinutes ? `${Math.round(item.durationMinutes / 60)}h ${item.durationMinutes % 60}m` : item.duration,
+          duration,
           priority: item.priority,
           reminder: Boolean(item.reminder),
           projectId: item.projectId,
+          contactName: item.contactName,
+          contactPhone: item.contactPhone,
         }, userId),
       });
       created.push(mapTask(task));
@@ -672,7 +809,7 @@ app.post('/api/ai/confirm', async (req, res) => {
             userId,
             taskId: task.id,
             title: `Reminder: ${task.title}`,
-            remindAt: taskDate(item.date, item.startTime || '09:00'),
+            remindAt: taskDate(item.date),
             enabled: true,
             status: 'scheduled',
           },
@@ -687,29 +824,27 @@ app.post('/api/ai/confirm', async (req, res) => {
           where: { userId, title: { contains: String(reschedule.titleHint) } },
         });
       if (existing) {
-        await prisma.task.update({
+        const updated = await prisma.task.update({
           where: { id: existing.id },
           data: {
-            dueAt: taskDate(reschedule.date, reschedule.startTime),
+            dueAt: taskDate(reschedule.date),
             startTime: reschedule.startTime || existing.startTime,
           },
+          include: { categories: { include: { category: true } } },
         });
+        rescheduled.push(mapTask(updated));
+        if (updated.reminderEnabled) {
+          await prisma.reminder.updateMany({
+            where: { userId, taskId: updated.id, kind: 'time', enabled: true },
+            data: { remindAt: taskDate(reschedule.date) },
+          });
+        }
         await notify(userId, 'Task rescheduled', existing.title, 'schedule', 'task', existing.id);
       }
     }
     const arrivals = [];
-    for (const item of arrivalReminders) {
-      const needle = String(item.placeName || item.place || '').toLowerCase().trim();
-      const places = await prisma.place.findMany({ where: { userId } });
-      const place = places.find((row) => {
-        const name = String(row.name || '').toLowerCase();
-        return name === needle || name.includes(needle) || needle.includes(name);
-      });
-      if (!place) {
-        return res.status(400).json({
-          message: `Save a place named “${item.placeName || 'home or work'}” in Integrations first, then confirm again.`,
-        });
-      }
+    for (const [index, item] of arrivalReminders.entries()) {
+      const place = resolvedArrivalPlaces[index];
       const reminder = await prisma.reminder.create({
         data: {
           userId,
@@ -727,7 +862,7 @@ app.post('/api/ai/confirm', async (req, res) => {
       arrivals.push(reminder);
       await notify(userId, 'Arrival reminder', reminder.title, 'reminder', 'reminder', reminder.id);
     }
-    return res.json({ created, arrivals, ok: true });
+    return res.json({ created, rescheduled, arrivals, ok: true });
   } catch (error) {
     return res.status(400).json({ message: error.message });
   }
@@ -751,7 +886,10 @@ app.post('/api/ai/schedule', async (req, res) => {
     const result = await ai.interpret({
       message,
       timezone: req.body?.timezone,
-      existingTasks: await ownedTasks(userId),
+      existingTasks: [
+        ...await ownedTasks(userId),
+        ...calendarBusyTasks(req.body?.calendarEvents),
+      ],
       contacts: req.body?.contacts,
     });
     return res.json(result);

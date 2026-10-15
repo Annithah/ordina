@@ -2,8 +2,19 @@ import axios from 'axios';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+const LOCAL_URL = /^https?:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+
+/** In development, the computer serving the app over Wi-Fi also runs the API, so follow its current IP. */
+function devLanApiUrl(): string | null {
+  if (!__DEV__) return null;
+  const host = (Constants.expoConfig?.hostUri as string | undefined)?.split(':')[0];
+  if (!host || !/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.startsWith('127.')) return null;
+  return `http://${host}:4000`;
+}
+
 function resolveApiBaseUrl(): string {
   const configuredUrl = process.env.EXPO_PUBLIC_API_URL;
+  if (configuredUrl && LOCAL_URL.test(configuredUrl)) return devLanApiUrl() ?? configuredUrl;
   if (configuredUrl) return configuredUrl;
 
   const extraApiUrl = Constants.expoConfig?.extra?.apiUrl as string | undefined;

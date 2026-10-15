@@ -15,8 +15,12 @@ export function ThemeToggle() {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={t('home.toggleTheme')}
+      hitSlop={6}
       onPress={() => setPreference(isDark ? 'light' : 'dark')}
-      style={[styles.btn, { backgroundColor: theme.card, borderColor: theme.border }]}>
+      style={({ pressed }) => [
+        styles.btn,
+        { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
+      ]}>
       <Ionicons name={isDark ? 'sunny-outline' : 'moon-outline'} size={20} color={theme.primary} />
     </Pressable>
   );
@@ -24,9 +28,9 @@ export function ThemeToggle() {
 
 const styles = StyleSheet.create({
   btn: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

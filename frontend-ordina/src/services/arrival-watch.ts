@@ -32,29 +32,26 @@ export function useArrivalWatch(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     let subscription: { remove: () => void } | null = null;
+    let refreshTimer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    let permissionAttempted = false;
+    let locationStarted = false;
     const fired = new Set<number>();
+    let arrivals: ArrivalReminder[] = [];
 
-    async function start() {
+    async function loadArrivals(): Promise<ArrivalReminder[]> {
+      const { data } = await api.get('/api/reminders');
+      return ((data.reminders || []) as ArrivalReminder[]).filter(
+        (row) => row.kind === 'arrival' && row.enabled !== false && !row.completed && row.latitude != null && row.longitude != null,
+      );
+    }
+
+    async function startWatching() {
+      if (cancelled || locationStarted || !arrivals.length || permissionAttempted) return;
+      permissionAttempted = true;
       const permission = await Location.requestForegroundPermissionsAsync();
       if (!permission.granted || cancelled) return;
-
-      async function loadArrivals(): Promise<ArrivalReminder[]> {
-        const { data } = await api.get('/api/reminders');
-        return ((data.reminders || []) as ArrivalReminder[]).filter(
-          (row) => row.kind === 'arrival' && row.enabled !== false && !row.completed && row.latitude != null && row.longitude != null,
-        );
-      }
-
-      let arrivals = await loadArrivals().catch(() => [] as ArrivalReminder[]);
-      const refresh = setInterval(() => {
-        void loadArrivals()
-          .then((next) => {
-            arrivals = next;
-          })
-          .catch(() => undefined);
-      }, 60000);
-
+      locationStarted = true;
       subscription = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 25, timeInterval: 15000 },
         async (position) => {
@@ -64,21 +61,36 @@ export function useArrivalWatch(enabled: boolean) {
             const meters = haversineMeters(here, { latitude: reminder.latitude, longitude: reminder.longitude });
             if (meters <= (reminder.radiusMeters || 150)) {
               fired.add(reminder.id);
-              await presentImmediateNotification('ORDINA', reminder.title);
-              await api.patch(`/api/reminders/${reminder.id}`, { completed: true, enabled: false }).catch(() => undefined);
+              try {
+                await presentImmediateNotification('ORDINA', reminder.title);
+                await api.patch(`/api/reminders/${reminder.id}`, { completed: true, enabled: false });
+              } catch (error) {
+                console.error(`Unable to complete arrival reminder ${reminder.id}:`, error);
+              }
             }
           }
         },
       );
-
-      return () => clearInterval(refresh);
     }
 
-    const extraCleanup = start();
+    async function refreshArrivals() {
+      try {
+        arrivals = await loadArrivals();
+      } catch (error) {
+        console.error('Unable to refresh arrival reminders:', error);
+        return;
+      }
+      await startWatching();
+    }
+
+    void refreshArrivals().catch((error) => console.error('Unable to start arrival reminder monitoring:', error));
+    refreshTimer = setInterval(() => {
+      void refreshArrivals().catch((error) => console.error('Unable to refresh arrival reminders:', error));
+    }, 60000);
     return () => {
       cancelled = true;
       subscription?.remove();
-      void extraCleanup.then((stopRefresh) => stopRefresh?.());
+      if (refreshTimer) clearInterval(refreshTimer);
     };
   }, [enabled]);
 }

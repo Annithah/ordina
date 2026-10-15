@@ -4,7 +4,7 @@ SQLite via Prisma. Local development uses `@prisma/adapter-better-sqlite3`. Remo
 
 ## Models
 
-User owns tasks, projects, goals, reminders, notifications, AI messages, and categories.
+User accounts store a timezone and own tasks, projects, goals, reminders, notifications, AI messages, and categories.
 
 - **Task** — schedule fields, recurrence series + occurrence rows, optional project/goal, reminders
 - **Project** — status, priority, dates; progress is computed from tasks
