@@ -10,7 +10,8 @@
     "db:generate": "node node_modules/prisma/build/index.js generate",
     "db:test": "node scripts/test-db.js",
     "db:test:prisma": "node scripts/test-prisma.js",
-    "test": "npm run db:test"
+    "test": "npm run test:unit && npm run db:test",
+    "test:unit": "node --test \"test/**/*.test.js\""
   },
   "keywords": [],
   "author": "",

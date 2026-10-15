@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ContactActions } from '@/components/contact-actions';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
@@ -15,6 +16,7 @@ import { useTasksStore, type Task } from '@/store/tasks-store';
 import { api } from '@/services/api';
 import { localDateKey, addLocalDays } from '@/utils/dates';
 import { HEALTH_LABEL, healthColor, summarize, taskHealth } from '@/utils/task-health';
+import { friendlyError } from '@/utils/task-validation';
 
 function StatusBar({ counts, colors }: {
   counts: { completed: number; inProgress: number; overdue: number };
@@ -423,7 +425,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity
-                onPress={() => toggleComplete(task.id)}
+                onPress={() => void toggleComplete(task.id).catch((error) => toast.error(friendlyError(error, 'Could not update the task.')))}
                 style={[
                   styles.checkbox,
                   {

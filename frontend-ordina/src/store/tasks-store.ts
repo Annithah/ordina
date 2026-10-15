@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 
 import { api } from '@/services/api';
 import { cancelTaskReminder } from '@/services/notifications';
+import { friendlyError } from '@/utils/task-validation';
 
 export type Priority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed';
@@ -34,6 +35,10 @@ export interface Task {
 
 interface TasksState {
   tasks: Task[];
+  /** True until the first load finishes (successfully or not). */
+  loading: boolean;
+  /** Last load error; the previous list stays visible so a flaky network never looks like "no tasks". */
+  loadError: string | null;
   loadTasks: () => Promise<void>;
   getTaskById: (id: string) => Task | undefined;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>;
@@ -75,6 +80,8 @@ function normalizeTask(task: any): Task {
 
 export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
+  loading: true,
+  loadError: null,
 
   getTaskById: (id) => get().tasks.find((task) => task.id === id),
 
@@ -82,9 +89,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     try {
       const { data } = await api.get('/api/tasks');
       const tasks = Array.isArray(data?.tasks) ? data.tasks.map(normalizeTask) : [];
-      set({ tasks });
-    } catch {
-      set({ tasks: [] });
+      set({ tasks, loading: false, loadError: null });
+    } catch (error) {
+      set({ loading: false, loadError: friendlyError(error, 'Could not load your tasks.') });
     }
   },
 
@@ -120,7 +127,19 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   toggleComplete: async (id) => {
     const task = get().tasks.find((item) => item.id === id);
     if (!task) return;
-    await api.patch(`/api/tasks/${id}/complete`, { completed: !task.completed });
+    const completed = !task.completed;
+    // Optimistic: flip it now, roll back if the server refuses.
+    set((state) => ({
+      tasks: state.tasks.map((item) => (item.id === id
+        ? { ...item, completed, status: completed ? 'completed' : 'todo' }
+        : item)),
+    }));
+    try {
+      await api.patch(`/api/tasks/${id}/complete`, { completed });
+    } catch (error) {
+      set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? task : item)) }));
+      throw error;
+    }
     if (!task.completed) {
       try {
         await cancelTaskReminder(id);
