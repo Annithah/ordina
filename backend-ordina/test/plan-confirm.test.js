@@ -20,7 +20,8 @@ if (testUrl) {
   const backendRoot = path.resolve(__dirname, '..');
   execFileSync(process.execPath, [path.join(backendRoot, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy'], {
     cwd: backendRoot,
-    env: { ...process.env, DATABASE_URL: url.toString() },
+    // Both variables: the Prisma CLI prefers DATABASE_URL_UNPOOLED, which may point at Neon.
+    env: { ...process.env, DATABASE_URL: url.toString(), DATABASE_URL_UNPOOLED: url.toString() },
     stdio: 'ignore',
   });
   const { PrismaClient } = require('@prisma/client');
