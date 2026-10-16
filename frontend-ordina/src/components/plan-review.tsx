@@ -75,7 +75,7 @@ function Option({ label, active, onPress, theme, color }: { label: string; activ
   );
 }
 
-function TaskEditor({ task, today, onChange, theme }: { task: DraftTask; today: string; onChange: (task: DraftTask) => void; theme: Theme }) {
+function TaskEditor({ task, today, titleMax, onChange, theme }: { task: DraftTask; today: string; titleMax: number; onChange: (task: DraftTask) => void; theme: Theme }) {
   const set = <K extends PlanField | 'title'>(field: K, value: DraftTask[K]) => onChange(editDraft(task, field, value));
   return (
     <View style={styles.editor}>
@@ -83,7 +83,7 @@ function TaskEditor({ task, today, onChange, theme }: { task: DraftTask; today: 
         value={task.title}
         onChangeText={(text) => set('title', text)}
         accessibilityLabel="Task title"
-        maxLength={200}
+        maxLength={titleMax}
         placeholder="Task title"
         placeholderTextColor={theme.textSecondary}
         style={[styles.titleInput, { color: theme.text, borderColor: task.title.trim() ? theme.border : theme.danger }]}
@@ -125,12 +125,12 @@ function TaskEditor({ task, today, onChange, theme }: { task: DraftTask; today: 
   );
 }
 
-function TaskCard({ task, today, expanded, overlaps, onToggle, onChange, onRemove, theme }: {
-  task: DraftTask; today: string; expanded: boolean; overlaps: string[]; onToggle: () => void; onChange: (task: DraftTask) => void; onRemove: () => void; theme: Theme;
+function TaskCard({ task, today, titleMax, expanded, overlaps, needsNewTime, onToggle, onChange, onRemove, theme }: {
+  task: DraftTask; today: string; titleMax: number; expanded: boolean; overlaps: string[]; needsNewTime: boolean; onToggle: () => void; onChange: (task: DraftTask) => void; onRemove: () => void; theme: Theme;
 }) {
   const deadline = formatDeadline(task.deadline);
   return (
-    <View style={[styles.card, { backgroundColor: theme.card, borderColor: expanded ? theme.primary : theme.border }]}>
+    <View style={[styles.card, { backgroundColor: theme.card, borderColor: needsNewTime ? theme.danger : expanded ? theme.primary : theme.border }]}>
       <View style={styles.cardHead}>
         <Pressable
           accessibilityRole="button"
@@ -152,6 +152,14 @@ function TaskCard({ task, today, expanded, overlaps, onToggle, onChange, onRemov
           <Ionicons name="trash-outline" size={19} color={theme.danger} />
         </Pressable>
       </View>
+      {needsNewTime ? (
+        <View style={styles.noteRow}>
+          <Ionicons name="time-outline" size={13} color={theme.danger} />
+          <ThemedText style={[styles.note, { color: theme.danger, fontFamily: 'Poppins_600SemiBold' }]}>
+            Needs a new time: {task.startTime ? formatTime12(task.startTime) : 'this time'} has already passed today. Tap to change it.
+          </ThemedText>
+        </View>
+      ) : null}
       {deadline ? (
         <View style={styles.noteRow}>
           <Ionicons name="flag-outline" size={13} color={theme.danger} />
@@ -180,7 +188,7 @@ function TaskCard({ task, today, expanded, overlaps, onToggle, onChange, onRemov
           <ThemedText style={[styles.note, { color: theme.warning }]}>{warning}</ThemedText>
         </View>
       ))}
-      {expanded ? <TaskEditor task={task} today={today} onChange={onChange} theme={theme} /> : null}
+      {expanded ? <TaskEditor task={task} today={today} titleMax={titleMax} onChange={onChange} theme={theme} /> : null}
     </View>
   );
 }
@@ -226,6 +234,16 @@ export type PlanReviewProps = {
   onSubmitAnswers: () => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Defaults to "Review your plan". */
+  heading?: string;
+  subheading?: string;
+  /** Label of the save button for the number of tasks. */
+  confirmLabel?: (count: number) => string;
+  /** Shows a heading for each day, tasks in time order. */
+  groupByDay?: boolean;
+  /** Tasks that can't be saved until the user picks a new time (e.g. a time already over). */
+  needsNewTime?: (task: DraftTask) => boolean;
+  titleMax?: number;
 };
 
 export function PlanReview(props: PlanReviewProps) {
@@ -233,7 +251,12 @@ export function PlanReview(props: PlanReviewProps) {
   const { tasks, questions, answers, saving, replanning } = props;
   const [expanded, setExpanded] = useState<string | null>(null);
   const answered = questions.filter((question) => (answers[question.id] ?? '').trim()).length;
-  const invalid = tasks.some((task) => !task.title.trim());
+  const blocked = tasks.filter((task) => props.needsNewTime?.(task)).length;
+  const invalid = tasks.some((task) => !task.title.trim()) || blocked > 0;
+  const titleMax = props.titleMax ?? 200;
+  const ordered = props.groupByDay
+    ? [...tasks].sort((a, b) => a.date.localeCompare(b.date) || (a.startTime ?? '99:99').localeCompare(b.startTime ?? '99:99'))
+    : tasks;
   const busy = saving || replanning;
   const overlaps = overlapsByTask(tasks);
 
@@ -246,9 +269,9 @@ export function PlanReview(props: PlanReviewProps) {
   return (
     <View style={[styles.review, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.reviewHead}>
-        <ThemedText style={styles.reviewTitle} accessibilityHint={props.summary}>Review your plan</ThemedText>
+        <ThemedText style={styles.reviewTitle} accessibilityHint={props.summary}>{props.heading ?? 'Review your plan'}</ThemedText>
         <ThemedText themeColor="textSecondary" style={styles.reviewSummary}>
-          Nothing is saved until you add it. Edit or remove anything first.
+          {props.subheading ?? 'Nothing is saved until you add it. Edit or remove anything first.'}
         </ThemedText>
       </View>
 
@@ -257,7 +280,9 @@ export function PlanReview(props: PlanReviewProps) {
           <Ionicons name="sparkles" size={12} color={theme.primary} />
           <ThemedText themeColor="textSecondary" style={styles.legendText}>Suggested</ThemedText>
           <Ionicons name="repeat" size={12} color={theme.primary} />
-          <ThemedText themeColor="textSecondary" style={styles.legendText}>Your usual</ThemedText>
+          {tasks.some((task) => Object.values(task.sources).includes('habit')) ? (
+            <ThemedText themeColor="textSecondary" style={styles.legendText}>Your usual</ThemedText>
+          ) : null}
           <View style={[styles.legendSwatch, { borderColor: theme.border, backgroundColor: theme.backgroundElement }]} />
           <ThemedText themeColor="textSecondary" style={styles.legendText}>What you said · tap a task to edit</ThemedText>
         </View>
@@ -288,19 +313,31 @@ export function PlanReview(props: PlanReviewProps) {
         </View>
       ) : null}
 
-      {tasks.map((task) => (
+      {ordered.map((task, index) => (
+        <View key={task.key} style={{ gap: 8 }}>
+          {props.groupByDay && ordered[index - 1]?.date !== task.date ? (
+            <ThemedText accessibilityRole="header" style={styles.sectionLabel}>{friendlyDay(task.date)}</ThemedText>
+          ) : null}
         <TaskCard
-          key={task.key}
           theme={theme}
           task={task}
           today={props.today}
+          titleMax={titleMax}
+          needsNewTime={Boolean(props.needsNewTime?.(task))}
           expanded={expanded === task.key}
           overlaps={overlaps.get(task.key) ?? []}
           onToggle={() => setExpanded(expanded === task.key ? null : task.key)}
           onChange={update}
           onRemove={() => remove(task.key)}
         />
+        </View>
       ))}
+
+      {blocked ? (
+        <ThemedText accessibilityRole="alert" style={[styles.note, { color: theme.danger }]}>
+          {blocked === 1 ? '1 task needs a new time before you can save.' : `${blocked} tasks need a new time before you can save.`}
+        </ThemedText>
+      ) : null}
 
       {!tasks.length && !questions.length ? (
         <ThemedText themeColor="textSecondary">No tasks left in this plan.</ThemedText>
@@ -324,7 +361,7 @@ export function PlanReview(props: PlanReviewProps) {
           style={[styles.primary, { backgroundColor: theme.primary, opacity: !tasks.length || invalid || busy ? 0.5 : 1 }]}>
           {saving ? <ActivityIndicator color="#FFFFFF" /> : <Ionicons name="checkmark-circle" size={18} color="#FFFFFF" />}
           <ThemedText style={styles.primaryText}>
-            {saving ? 'Adding…' : tasks.length > 1 ? `Add ${tasks.length} tasks to my plan` : 'Add tasks to my plan'}
+            {saving ? 'Adding…' : props.confirmLabel ? props.confirmLabel(tasks.length) : tasks.length > 1 ? `Add ${tasks.length} tasks to my plan` : 'Add tasks to my plan'}
           </ThemedText>
         </Pressable>
         <Pressable

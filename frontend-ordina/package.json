@@ -60,6 +60,8 @@
   },
   "scripts": {
     "start": "expo start --go",
+    "test": "node --test src/features/tasks/parseTasks.test.mjs",
+    "typecheck": "tsc --noEmit",
     "start:dev-client": "expo start --dev-client",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
