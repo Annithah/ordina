@@ -8,6 +8,13 @@
  */
 export const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
 
+/**
+ * Development test build (EXPO_PUBLIC_LOCAL_MODE=1): no accounts and no cloud server.
+ * Tasks live on the phone in SQLite (works fully offline). Only ORDINA AI talks to the
+ * backend running on the developer's laptop (EXPO_PUBLIC_API_URL, plain http on Wi-Fi).
+ */
+export const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
+
 export const FEATURES = {
   /** Google / Apple sign-in buttons (email accounts are always available). */
   socialSignIn: !STORE_BUILD,
@@ -23,4 +30,12 @@ export const FEATURES = {
   mediaToTasks: !STORE_BUILD,
   /** Busy times / events from Google Calendar. */
   googleCalendar: !STORE_BUILD,
+  /** Email accounts, sign-in and server-side task storage. */
+  accounts: !LOCAL_MODE,
+  /** Goals, server reminders, notifications inbox and projects (server data). */
+  serverWorkspace: !LOCAL_MODE,
+  /** Repeating tasks (expanded by the server). */
+  repeatingTasks: !LOCAL_MODE,
+  /** "Plan my day", "What should I do now?" etc. (they read and move server tasks). */
+  aiQuickActions: !LOCAL_MODE,
 } as const;

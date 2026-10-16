@@ -12,7 +12,8 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
 import { usePreferencesStore, type OnboardingAnswers } from '@/store/preferences-store';
 import { href } from '@/utils/href';
-import { FEATURES } from '@/config/release';
+import { FEATURES, LOCAL_MODE } from '@/config/release';
+import { routeAfterAuth } from '@/utils/after-auth';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 type Option = { id: string; label: string; icon: IconName };
@@ -194,7 +195,12 @@ export default function OnboardingScreen() {
                 </View>
               ))}
             </View>
-            {isSignedIn ? (
+            {LOCAL_MODE ? (
+              <PrimaryButton
+                label="Start planning"
+                onPress={() => void saveAnswers(answers).then(completeOnboarding).then(routeAfterAuth)}
+              />
+            ) : isSignedIn ? (
               <PrimaryButton label="Back to ORDINA" onPress={() => router.replace(href('/(tabs)'))} />
             ) : (
               <>

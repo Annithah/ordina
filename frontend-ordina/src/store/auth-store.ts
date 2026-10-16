@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import { create } from 'zustand';
 
+import { LOCAL_MODE } from '@/config/release';
 import { api, setAuthToken } from '@/services/api';
 import { useLockStore } from '@/store/lock-store';
 
@@ -80,6 +81,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   hydrate: async () => {
     const onboarding = await read(KEYS.onboarding);
+    if (LOCAL_MODE) {
+      // Offline test build: no accounts. The phone itself is the user; tasks stay on it.
+      set({ hydrated: true, hasSeenOnboarding: onboarding === '1', isSignedIn: true, user: { name: '', email: '' } });
+      return;
+    }
     const session = await read(KEYS.session);
     let user: AuthUser | null = null;
     if (session) {

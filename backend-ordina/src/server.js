@@ -45,7 +45,7 @@ app.use(rateLimit({
 }));
 // Stricter limits where guessing or cost matters.
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { message: 'Too many attempts. Please wait a few minutes and try again.' } });
-app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete'], authLimiter);
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete', '/api/device/session'], authLimiter);
 app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { message: 'You are sending requests very quickly. Please wait a moment.' } }));
 
 app.get('/health', async (_req, res) => {
@@ -63,7 +63,7 @@ app.get('/api/health', async (_req, res) => {
     res.json({
       ok: true,
       service: 'ordina-backend',
-      db: 'postgresql',
+      db: 'sqlite',
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
@@ -294,6 +294,37 @@ app.delete('/api/auth/account', async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
+  }
+});
+
+/**
+ * Offline (development) mode: the phone keeps tasks on the device and has no email account.
+ * It identifies itself with a random device id and gets a token only for ORDINA AI, so the
+ * learned planning profile is kept per phone. Nothing else is stored for the device.
+ */
+app.post('/api/device/session', async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deviceId)) {
+    return res.status(400).json({ message: 'A valid device id is required.' });
+  }
+  const email = `device-${deviceId}@device.ordina.local`;
+  try {
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const name = String(req.body?.name || '').trim().slice(0, 80) || 'ORDINA device';
+      user = await prisma.user.create({
+        data: {
+          email,
+          displayName: name,
+          // Random, never shown: device accounts cannot sign in with a password.
+          passwordHash: await require('argon2').hash(require('node:crypto').randomBytes(32).toString('hex')),
+        },
+      });
+    }
+    return res.json({ token: signToken(user) });
+  } catch (error) {
+    console.error('Device session failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not start an ORDINA AI session.' });
   }
 });
 
@@ -1001,6 +1032,24 @@ const AI_FRIENDLY = {
   AI_BAD_REQUEST: 'ORDINA AI couldn’t read that request. Try rephrasing it.',
 };
 
+/** Busy tasks sent by the phone in offline mode, reduced to what scheduling needs. */
+function clientBusyTasks(tasks) {
+  if (!Array.isArray(tasks)) return [];
+  return tasks.slice(0, 300).flatMap((task) => {
+    const dueDate = String(task?.dueDate || '');
+    const startTime = String(task?.startTime || '');
+    if (!taskValidation.isValidDateKey(dueDate) || !taskValidation.isValidTime(startTime)) return [];
+    const minutes = taskValidation.parseDurationMinutes(task?.duration ?? task?.durationMinutes);
+    return [{
+      title: String(task?.title || 'Task').slice(0, 200),
+      dueDate,
+      startTime,
+      duration: taskValidation.formatDuration(minutes && minutes >= 5 && minutes <= 1440 ? minutes : 60),
+      completed: Boolean(task?.completed),
+    }];
+  });
+}
+
 function cleanAnswers(answers) {
   return (Array.isArray(answers) ? answers : [])
     .slice(0, 5)
@@ -1035,10 +1084,13 @@ app.post('/api/ai/plan', async (req, res) => {
       await prisma.user.updateMany({ where: { id: userId, NOT: { timezone } }, data: { timezone } }).catch(() => undefined);
     }
     await materializeRecurrence(userId);
-    const [existingTasks, profile] = await Promise.all([
+    // Offline mode: the phone sends its own tasks (busy times for overlap checks, recent tasks
+    // for personalization). Gemini still only receives times and habits, never these titles.
+    const [serverTasks, profile] = await Promise.all([
       ownedTasks(userId),
-      planService.refreshProfile(prisma, userId),
+      planService.refreshProfile(prisma, userId, [], req.body?.history),
     ]);
+    const existingTasks = [...serverTasks, ...clientBusyTasks(req.body?.existingTasks)];
     const plan = await planner.createPlan({
       message,
       answers: cleanAnswers(req.body?.answers),
@@ -1063,6 +1115,19 @@ app.post('/api/ai/plan', async (req, res) => {
       message: AI_FRIENDLY[code] || 'Something went wrong while planning. Please try again.',
       code,
     });
+  }
+});
+
+/** Offline mode: the phone saved the plan itself; learn from the user's corrections. */
+app.post('/api/ai/plan/learn', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    return res.json(await planService.learnFromPlan(prisma, userId, { tasks: req.body?.tasks, history: req.body?.history }));
+  } catch (error) {
+    if (error.status && error.status < 500) return res.status(error.status).json({ message: error.message });
+    console.error('AI plan learn failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not update your planning preferences.' });
   }
 });
 

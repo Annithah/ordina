@@ -1,15 +1,22 @@
 require('dotenv/config');
 
+const fs = require('fs');
+const path = require('path');
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
+const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl || !/^postgres(ql)?:\/\//i.test(databaseUrl)) {
-  throw new Error('DATABASE_URL must be a PostgreSQL connection string (Neon in production, `prisma dev` locally). See backend-ordina/.env.example');
+// Development setup: one SQLite file on this laptop (default backend-ordina/data/ordina.sqlite).
+// It only holds AI personalization and device sessions; tasks live on the phone.
+const databaseUrl = process.env.DATABASE_URL || 'file:./data/ordina.sqlite';
+if (!/^file:/i.test(databaseUrl)) {
+  throw new Error('DATABASE_URL must be a SQLite file URL such as file:./data/ordina.sqlite (see backend-ordina/.env.example)');
 }
 
-// Neon suspends idle databases, so allow a few seconds for the first connection to wake it.
-const adapter = new PrismaPg({ connectionString: databaseUrl, connectionTimeoutMillis: 15_000, max: 5 });
-const prisma = new PrismaClient({ adapter });
+const relative = databaseUrl.replace(/^file:/i, '').replace(/^\/\/\//, '').replace(/^\/\//, '');
+const backendRoot = path.resolve(__dirname, '..', '..');
+const absolute = path.isAbsolute(relative) ? relative : path.resolve(backendRoot, relative);
+fs.mkdirSync(path.dirname(absolute), { recursive: true });
+
+const prisma = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: absolute }) });
 
 module.exports = prisma;

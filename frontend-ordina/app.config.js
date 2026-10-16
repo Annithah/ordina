@@ -8,6 +8,18 @@
  */
 
 const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
+// Offline test build: tasks on the phone, ORDINA AI on the developer's laptop over http.
+const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
+
+/** Allows plain-http requests (laptop on the local Wi-Fi). Used only by the offline test build. */
+function withCleartextTraffic(config) {
+  const { withAndroidManifest } = require('expo/config-plugins');
+  return withAndroidManifest(config, (mod) => {
+    const app = mod.modResults.manifest.application?.[0];
+    if (app) app.$['android:usesCleartextTraffic'] = 'true';
+    return mod;
+  });
+}
 
 // Plugins whose features are hidden in the store build.
 const STORE_EXCLUDED_PLUGINS = new Set([
@@ -62,13 +74,16 @@ module.exports = ({ config }) => {
 
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || '';
   // ORDINA_LOCAL_STORE_PREVIEW=1 lets a developer preview the store scope with `expo start`
-  // against a local backend. EAS builds never set it.
-  if (!isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
+  // against a local backend. The offline test build (LOCAL_MODE) uses the laptop's Wi-Fi address.
+  if (LOCAL_MODE && !/^http:\/\/[\w.-]+(:\d+)?\/?$/i.test(apiUrl)) {
+    throw new Error(`Offline test build needs EXPO_PUBLIC_API_URL set to the laptop address, e.g. http://192.168.1.20:4000 (got "${apiUrl}").`);
+  }
+  if (!LOCAL_MODE && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
     throw new Error(`Store build needs EXPO_PUBLIC_API_URL set to the HTTPS production backend (got "${apiUrl}").`);
   }
 
   const blocked = new Set([...(config.android?.blockedPermissions ?? []), ...STORE_BLOCKED_PERMISSIONS]);
-  return {
+  const result = {
     ...config,
     plugins: (config.plugins ?? []).filter((plugin) => !STORE_EXCLUDED_PLUGINS.has(pluginName(plugin))),
     android: {
@@ -77,4 +92,5 @@ module.exports = ({ config }) => {
       blockedPermissions: [...blocked],
     },
   };
+  return LOCAL_MODE ? withCleartextTraffic(result) : result;
 };

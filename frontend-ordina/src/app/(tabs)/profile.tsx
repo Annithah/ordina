@@ -19,7 +19,10 @@ import { deleteAccount } from '@/services/ai';
 import { disconnectGoogleCalendar } from '@/services/google-calendar';
 import { useAuthStore } from '@/store/auth-store';
 import { LOCALES } from '@/i18n/translations';
-import { FEATURES } from '@/config/release';
+import { FEATURES, LOCAL_MODE } from '@/config/release';
+import { deleteAllLocalData } from '@/services/local-tasks';
+import { toast } from '@/components/toast';
+import { useTasksStore } from '@/store/tasks-store';
 
 const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL;
 
@@ -70,6 +73,7 @@ export default function ProfileScreen() {
   const { preference, setPreference } = useAppTheme();
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
+  const loadTasks = useTasksStore((s) => s.loadTasks);
   const languageLabel = LOCALES.find((item) => item.id === locale)?.native ?? 'English';
 
   return (
@@ -154,7 +158,32 @@ export default function ProfileScreen() {
           {PRIVACY_URL ? (
             <SettingRow label="Privacy policy" onPress={() => void Linking.openURL(PRIVACY_URL)} />
           ) : null}
-          <Pressable
+          {LOCAL_MODE ? (
+            <Pressable
+              onPress={() => {
+                Alert.alert(
+                  'Delete all tasks?',
+                  'This permanently deletes every task stored on this phone. This cannot be undone.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: () => {
+                        void deleteAllLocalData()
+                          .then(() => loadTasks())
+                          .then(() => toast.success('All tasks on this phone were deleted'))
+                          .catch(() => toast.error('Could not delete the tasks. Please try again.'));
+                      },
+                    },
+                  ],
+                );
+              }}
+              style={[styles.settingRow, { borderBottomColor: theme.border }]}>
+              <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>Delete all tasks on this phone</ThemedText>
+            </Pressable>
+          ) : null}
+          {FEATURES.accounts ? <Pressable
             onPress={() => {
               Alert.alert(
                 'Delete account?',
@@ -179,30 +208,32 @@ export default function ProfileScreen() {
             }}
             style={[styles.settingRow, { borderBottomColor: theme.border }]}>
             <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>Delete account</ThemedText>
-          </Pressable>
-          <Pressable
+          </Pressable> : null}
+          {FEATURES.accounts ? <Pressable
             onPress={() => {
               void signOut().then(() => router.replace(href('/sign-in')));
             }}
             style={[styles.settingRow, { borderBottomColor: theme.border }]}>
             <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>{t('profile.signOut')}</ThemedText>
-          </Pressable>
+          </Pressable> : null}
         </View>
 
         {/* Notifications link */}
-        <Pressable
+        {FEATURES.serverWorkspace ? <Pressable
           onPress={() => router.push(href('/notifications'))}
           style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}
         >
           <Ionicons name="notifications-outline" size={20} color={theme.primary} />
           <ThemedText style={styles.notifLinkText}>View Notifications</ThemedText>
           <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
-        <Pressable onPress={() => router.push(href('/goals'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="flag-outline" size={20} color={theme.primary} />
-          <ThemedText style={styles.notifLinkText}>Manage Goals</ThemedText>
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
+        </Pressable> : null}
+        {FEATURES.serverWorkspace ? (
+          <Pressable onPress={() => router.push(href('/goals'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Ionicons name="flag-outline" size={20} color={theme.primary} />
+            <ThemedText style={styles.notifLinkText}>Manage Goals</ThemedText>
+            <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
         {FEATURES.integrations ? (
           <Pressable onPress={() => router.push(href('/integrations'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Ionicons name="phone-portrait-outline" size={20} color={theme.primary} />

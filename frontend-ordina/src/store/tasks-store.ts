@@ -1,7 +1,15 @@
 import { create } from 'zustand';
 import { Alert } from 'react-native';
 
+import { LOCAL_MODE } from '@/config/release';
 import { api } from '@/services/api';
+import {
+  createLocalTask,
+  deleteLocalTask,
+  listLocalTasks,
+  setLocalTaskCompleted,
+  updateLocalTask,
+} from '@/services/local-tasks';
 import { cancelTaskReminder } from '@/services/notifications';
 import { friendlyError } from '@/utils/task-validation';
 
@@ -90,8 +98,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
   loadTasks: async () => {
     try {
-      const { data } = await api.get('/api/tasks');
-      const tasks = Array.isArray(data?.tasks) ? data.tasks.map(normalizeTask) : [];
+      // Offline mode: tasks live on this phone (SQLite); otherwise on the ORDINA server.
+      const raw = LOCAL_MODE ? await listLocalTasks() : (await api.get('/api/tasks')).data?.tasks;
+      const tasks = Array.isArray(raw) ? raw.map(normalizeTask) : [];
       set({ tasks, loading: false, loadError: null });
     } catch (error) {
       set({ loading: false, loadError: friendlyError(error, 'Could not load your tasks.') });
@@ -99,21 +108,28 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   },
 
   addTask: async (taskData) => {
-    const { data } = await api.post('/api/tasks', taskData);
+    const created = LOCAL_MODE
+      ? await createLocalTask(taskData as Record<string, unknown>)
+      : (await api.post('/api/tasks', taskData)).data.task;
     await get().loadTasks();
-    return normalizeTask(data.task);
+    return normalizeTask(created);
   },
 
   updateTask: async (id, updates) => {
-    await api.patch(`/api/tasks/${id}`, {
-      ...updates,
-      projectId: updates.projectId === undefined ? undefined : updates.projectId || null,
-    });
+    if (LOCAL_MODE) {
+      await updateLocalTask(id, updates as Record<string, unknown>);
+    } else {
+      await api.patch(`/api/tasks/${id}`, {
+        ...updates,
+        projectId: updates.projectId === undefined ? undefined : updates.projectId || null,
+      });
+    }
     await get().loadTasks();
   },
 
   deleteTask: async (id) => {
-    await api.delete(`/api/tasks/${id}`);
+    if (LOCAL_MODE) await deleteLocalTask(id);
+    else await api.delete(`/api/tasks/${id}`);
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
     try {
       await cancelTaskReminder(id);
@@ -138,7 +154,8 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         : item)),
     }));
     try {
-      await api.patch(`/api/tasks/${id}/complete`, { completed });
+      if (LOCAL_MODE) await setLocalTaskCompleted(id, completed);
+      else await api.patch(`/api/tasks/${id}/complete`, { completed });
     } catch (error) {
       set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? task : item)) }));
       throw error;
@@ -164,7 +181,8 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     const status = task.status === 'in_progress' ? 'todo' : 'in_progress';
     set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? { ...item, status } : item)) }));
     try {
-      await api.patch(`/api/tasks/${id}`, { status });
+      if (LOCAL_MODE) await updateLocalTask(id, { status });
+      else await api.patch(`/api/tasks/${id}`, { status });
     } finally {
       await get().loadTasks();
     }

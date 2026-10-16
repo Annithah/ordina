@@ -95,6 +95,8 @@ export default function HomeScreen() {
 
   useEffect(() => {
     void loadTasks();
+    // Offline mode: goals, reminders, notifications and the server dashboard don't exist.
+    if (!FEATURES.serverWorkspace) return;
     void Promise.all([loadGoals(), loadReminders(), loadNotifications()])
       .then(() => setWorkspaceError(false))
       .catch(() => setWorkspaceError(true));
@@ -225,49 +227,51 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        <View style={[styles.workspace, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <ThemedText style={[styles.sectionTitle, styles.workspaceTitle]}>Your workspace</ThemedText>
-          {workspaceError ? (
-            <ThemedText themeColor="textSecondary" style={styles.workspaceError}>
-              Some dashboard details could not be loaded. Check your connection and reopen this screen to retry.
-            </ThemedText>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/goals')}
-            style={[styles.workspaceRow, { borderBottomColor: theme.border }]}>
-            <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
-              <Ionicons name="flag-outline" size={18} color={theme.primary} />
-            </View>
-            <ThemedText style={styles.workspaceLabel}>Active goals</ThemedText>
-            <ThemedText style={styles.workspaceCount}>{activeGoals.length}</ThemedText>
-            <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
-          </Pressable>
-          {FEATURES.reminders ? (
+        {FEATURES.serverWorkspace ? (
+          <View style={[styles.workspace, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <ThemedText style={[styles.sectionTitle, styles.workspaceTitle]}>Your workspace</ThemedText>
+            {workspaceError ? (
+              <ThemedText themeColor="textSecondary" style={styles.workspaceError}>
+                Some dashboard details could not be loaded. Check your connection and reopen this screen to retry.
+              </ThemedText>
+            ) : null}
             <Pressable
               accessibilityRole="button"
-              onPress={() => router.push('/reminders')}
+              onPress={() => router.push('/goals')}
               style={[styles.workspaceRow, { borderBottomColor: theme.border }]}>
               <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
-                <Ionicons name="alarm-outline" size={18} color={theme.primary} />
+                <Ionicons name="flag-outline" size={18} color={theme.primary} />
               </View>
-              <ThemedText style={styles.workspaceLabel}>Active reminders</ThemedText>
-              <ThemedText style={styles.workspaceCount}>{activeReminders.length}</ThemedText>
+              <ThemedText style={styles.workspaceLabel}>Active goals</ThemedText>
+              <ThemedText style={styles.workspaceCount}>{activeGoals.length}</ThemedText>
               <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
             </Pressable>
-          ) : null}
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/notifications')}
-            style={styles.workspaceRow}>
-            <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
-              <Ionicons name="notifications-outline" size={18} color={theme.primary} />
-            </View>
-            <ThemedText style={styles.workspaceLabel}>Unread notifications</ThemedText>
-            <ThemedText style={styles.workspaceCount}>{unreadNotifications}</ThemedText>
-            <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
-          </Pressable>
-        </View>
+            {FEATURES.reminders ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push('/reminders')}
+                style={[styles.workspaceRow, { borderBottomColor: theme.border }]}>
+                <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
+                  <Ionicons name="alarm-outline" size={18} color={theme.primary} />
+                </View>
+                <ThemedText style={styles.workspaceLabel}>Active reminders</ThemedText>
+                <ThemedText style={styles.workspaceCount}>{activeReminders.length}</ThemedText>
+                <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/notifications')}
+              style={styles.workspaceRow}>
+              <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
+                <Ionicons name="notifications-outline" size={18} color={theme.primary} />
+              </View>
+              <ThemedText style={styles.workspaceLabel}>Unread notifications</ThemedText>
+              <ThemedText style={styles.workspaceCount}>{unreadNotifications}</ThemedText>
+              <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={[styles.dashboard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.dashboardHeader}>
