@@ -67,6 +67,10 @@ function db() {
       `);
       return database;
     })();
+    // If opening fails, try again on the next call instead of failing forever.
+    dbPromise.catch(() => {
+      dbPromise = null;
+    });
   }
   return dbPromise;
 }
