@@ -18,16 +18,25 @@ const planService = require('./lib/plan-service');
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
+const isProduction = process.env.NODE_ENV === 'production';
+
+// Behind Railway's (or any) HTTPS proxy: trust one hop so rate limits see the real client IP.
+if (isProduction || process.env.TRUST_PROXY) app.set('trust proxy', 1);
 
 app.use(helmet());
+// The Android app is not a browser and needs no CORS. Browsers are only allowed from CORS_ORIGINS
+// (comma-separated); in development every origin is allowed for the Expo web build.
+const corsOrigins = String(process.env.CORS_ORIGINS || '').split(',').map((item) => item.trim()).filter(Boolean);
 app.use(cors({
-  origin: true,
+  origin: corsOrigins.length ? corsOrigins : !isProduction,
   credentials: true,
 }));
 // Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
 app.use('/api/ai', express.json({ limit: '30mb' }));
 app.use(express.json({ limit: '2mb' }));
-app.use(morgan('dev'));
+app.use(express.urlencoded({ extended: false, limit: '10kb' }));
+// Method, path, status and timing only: no request bodies, so no task text or prompts in logs.
+app.use(morgan(isProduction ? ':method :url :status :response-time ms' : 'dev'));
 
 app.use(rateLimit({
   windowMs: 60 * 1000,
@@ -35,6 +44,19 @@ app.use(rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 }));
+// Stricter limits where guessing or cost matters.
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { message: 'Too many attempts. Please wait a few minutes and try again.' } });
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete'], authLimiter);
+app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { message: 'You are sending requests very quickly. Please wait a moment.' } }));
+
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true });
+  } catch {
+    res.status(503).json({ ok: false });
+  }
+});
 
 app.get('/api/health', async (_req, res) => {
   try {
@@ -57,7 +79,7 @@ app.get('/api/health', async (_req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ ok: false, message: 'Database unavailable', error: error.message });
+    res.status(500).json({ ok: false, message: 'Database unavailable', error: isProduction ? undefined : error.message });
   }
 });
 
@@ -98,7 +120,7 @@ app.post('/api/auth/register', async (req, res) => {
       token: signToken(user),
     });
   } catch (error) {
-    console.error('Register error:', error);
+    console.error('Register error:', error.code || error.message);
     if (error.code === 'P2002') {
       return res.status(409).json({ message: 'Email already registered.' });
     }
@@ -134,7 +156,7 @@ app.post('/api/auth/login', async (req, res) => {
       token: signToken(user),
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error:', error.code || error.message);
     return res.status(500).json({ message: 'Unable to sign in.', error: error.message });
   }
 });
@@ -171,6 +193,9 @@ app.post('/api/auth/forgot', async (req, res) => {
     if (!email) return res.status(400).json({ message: 'Email is required.' });
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
+      if (isProduction && !process.env.SMTP_HOST) {
+        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
+      }
       return res.json({ emailed: Boolean(process.env.SMTP_HOST), message: 'If that account exists, a reset code was issued.' });
     }
     const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -188,6 +213,12 @@ app.post('/api/auth/forgot', async (req, res) => {
       text: `Your ORDINA reset code is ${code}. It expires in 15 minutes.`,
     });
     if (!mailed.sent) {
+      // Returning the code is only acceptable on a developer's machine: in production it would
+      // let anyone reset any account by knowing its email address.
+      if (isProduction) {
+        await prisma.passwordReset.updateMany({ where: { userId: user.id, used: false }, data: { used: true } });
+        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
+      }
       return res.json({
         emailed: false,
         code,
@@ -234,12 +265,10 @@ app.post('/api/auth/reset', async (req, res) => {
   }
 });
 
-app.delete('/api/auth/account', async (req, res) => {
-  const userId = requireUser(req, res);
-  if (!userId) return;
-  try {
-    // Delete explicitly so removal does not depend on SQLite foreign-key enforcement.
-    await prisma.$transaction([
+/** Deletes a user and everything they own. Used by the app and by the public deletion page. */
+async function deleteAccountData(userId) {
+  // Delete explicitly so removal does not depend on SQLite foreign-key enforcement.
+  await prisma.$transaction([
       prisma.taskCategory.deleteMany({ where: { task: { userId } } }),
       prisma.taskDeadline.deleteMany({ where: { task: { userId } } }),
       prisma.planningProfile.deleteMany({ where: { userId } }),
@@ -256,9 +285,56 @@ app.delete('/api/auth/account', async (req, res) => {
       prisma.category.deleteMany({ where: { userId } }),
       prisma.user.delete({ where: { id: userId } }),
     ]);
+}
+
+app.delete('/api/auth/account', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    await deleteAccountData(userId);
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
+  }
+});
+
+/** Public account-deletion page (Google Play requires a web link as well as in-app deletion). */
+function deletionPage(body) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delete your ORDINA AI account</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#F8FAFC;color:#0F172A;margin:0;padding:24px}
+main{max-width:480px;margin:0 auto;background:#fff;border:1px solid #E2E8F0;border-radius:16px;padding:24px}
+h1{font-size:22px;margin:0 0 8px}p,li{line-height:1.5;color:#334155}label{display:block;font-weight:600;margin:14px 0 6px}
+input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #CBD5E1;border-radius:10px;font-size:16px}
+button{margin-top:18px;width:100%;padding:14px;border:0;border-radius:12px;background:#EF4444;color:#fff;font-size:16px;font-weight:700}
+.ok{color:#15803D}.err{color:#B91C1C}</style></head><body><main>${body}</main></body></html>`;
+}
+
+const DELETION_FORM = `<h1>Delete your ORDINA AI account</h1>
+<p>This permanently deletes your account and all its data: tasks, plans, AI chat history, learned planning preferences and settings. It cannot be undone.</p>
+<p>You can also delete your account inside the app: <strong>Profile &rarr; Delete account</strong>.</p>
+<form method="post" action="/account/delete">
+<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required>
+<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
+<button type="submit">Permanently delete my account</button></form>`;
+
+app.get('/account/delete', (_req, res) => {
+  res.type('html').send(deletionPage(DELETION_FORM));
+});
+
+app.post('/account/delete', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  const fail = () => res.status(400).type('html').send(deletionPage(`<p class="err">That email and password did not match an account.</p>${DELETION_FORM}`));
+  if (!email || !password) return fail();
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user || !(await require('argon2').verify(user.passwordHash, password).catch(() => false))) return fail();
+    await deleteAccountData(user.id);
+    return res.type('html').send(deletionPage('<h1>Account deleted</h1><p class="ok">Your ORDINA AI account and all its data have been permanently deleted.</p>'));
+  } catch (error) {
+    console.error('Web account deletion failed:', error.code || error.message);
+    return res.status(500).type('html').send(deletionPage('<p class="err">Something went wrong. Please try again later.</p>'));
   }
 });
 
@@ -1188,6 +1264,12 @@ process.on('exit', (code) => {
 });
 
 async function start() {
+  const jwtSecret = process.env.JWT_SECRET || '';
+  if (isProduction && (jwtSecret.length < 32 || /replace/i.test(jwtSecret))) {
+    console.error('ORDINA: JWT_SECRET must be set to a long random value (32+ characters) in production.');
+    process.exitCode = 1;
+    return;
+  }
   try {
     await prisma.$connect();
     await ensureSchema(prisma);
@@ -1199,7 +1281,7 @@ async function start() {
   }
 
   if (!gemini.isConfigured()) {
-    console.warn('ORDINA AI: GEMINI_API_KEY is not set. AI planning will answer "not available" until it is configured in backend-ordina/.env.');
+    console.warn('ORDINA AI: GEMINI_API_KEY is not set. AI planning will answer "not available" until it is set (backend .env locally, environment variable in production).');
   } else {
     console.log(`ORDINA AI: Gemini model ${gemini.configuredModel()}`);
   }
