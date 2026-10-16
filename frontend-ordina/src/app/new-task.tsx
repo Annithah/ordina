@@ -575,13 +575,15 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             </View>
           </Section> : null}
 
-          <Section icon="repeat-outline" title="Repeat">
-            <View style={styles.wrap}>
-              {REPEATS.map((item) => (
-                <Chip key={item.id} label={item.label} active={repeatId === item.id} onPress={() => setRepeatId(item.id)} />
-              ))}
-            </View>
-          </Section>
+          {FEATURES.repeatingTasks ? (
+            <Section icon="repeat-outline" title="Repeat">
+              <View style={styles.wrap}>
+                {REPEATS.map((item) => (
+                  <Chip key={item.id} label={item.label} active={repeatId === item.id} onPress={() => setRepeatId(item.id)} />
+                ))}
+              </View>
+            </Section>
+          ) : null}
 
           {FEATURES.contacts ? <Section icon="people-outline" title="With someone">
             {contact ? (

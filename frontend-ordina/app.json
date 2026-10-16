@@ -129,6 +129,13 @@
       "image": "./assets/images/ordina-logo-transparent.png",
       "resizeMode": "contain",
       "backgroundColor": "#F8FAFC"
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7e2f3397-4f0e-4035-9dd7-292c1ad1c2fb"
+      }
+    },
+    "owner": "anitha_dev"
   }
 }

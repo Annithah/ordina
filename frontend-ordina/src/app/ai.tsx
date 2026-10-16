@@ -30,6 +30,7 @@ import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { LAPTOP_MESSAGE } from '@/services/device-session';
 import { confirmAiActions, confirmPlan, fetchAiMessages, interpretFromMedia, interpretInstruction, requestPlan, transcribeAudio } from '@/services/ai';
 import { MAX_MEDIA_BYTES, matchingContacts, pickTaskMedia, type MediaSource } from '@/services/device-integrations';
 import {
@@ -90,6 +91,7 @@ function friendlyDate(date?: string) {
 }
 
 function errorMessage(error: any, fallback: string) {
+  if (error?.code === 'LAPTOP_UNREACHABLE') return LAPTOP_MESSAGE;
   const message: string = error?.response?.data?.message || error?.message || '';
   if (/not configured|GEMINI_API_KEY/i.test(message)) {
     return 'Voice, photo and video need ORDINA AI to be switched on for the server (GEMINI_API_KEY). You can still type your request.';
@@ -105,6 +107,7 @@ function errorMessage(error: any, fallback: string) {
 
 /** Server AI errors already carry a friendly message; everything else gets a plain explanation. */
 function aiErrorMessage(error: any, fallback: string) {
+  if (error?.code === 'LAPTOP_UNREACHABLE') return LAPTOP_MESSAGE;
   if (error?.response?.data?.code && error.response.data.message) return String(error.response.data.message);
   return friendlyError(error, fallback);
 }
@@ -687,7 +690,7 @@ export default function OrdinaAiScreen() {
           </View>
         ) : null}
 
-        {keyboardOpen || attachment ? null : (
+        {keyboardOpen || attachment || !FEATURES.aiQuickActions ? null : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickRow} contentContainerStyle={styles.quick}>
           {QUICK_PROMPTS.map((label) => (
             <Pressable
