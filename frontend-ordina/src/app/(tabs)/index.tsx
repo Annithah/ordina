@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ContactActions } from '@/components/contact-actions';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { OrdinaMark } from '@/components/ordina-mark';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
@@ -172,7 +173,7 @@ export default function HomeScreen() {
         <Pressable
           onPress={() => router.push('/ai')}
           style={[styles.aiBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="sparkles" size={18} color={theme.primary} />
+          <OrdinaMark size={28} />
           <ThemedText themeColor="textSecondary" style={styles.aiBarText}>
             {t('home.tellOrdina')}
           </ThemedText>
