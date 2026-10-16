@@ -53,7 +53,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#F8FAFC",
-          "image": "./assets/images/ordina-logo.png",
+          "image": "./assets/images/ordina-logo-transparent.png",
           "imageWidth": 200
         }
       ],

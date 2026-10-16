@@ -23,6 +23,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { OrdinaMark } from '@/components/ordina-mark';
 import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
@@ -464,7 +465,7 @@ export default function OrdinaAiScreen() {
           <Ionicons name="close" size={20} color={theme.text} />
         </Pressable>
         <View style={styles.headerTitle}>
-          <Image source={require('@/assets/images/ordina-logo.png')} style={styles.logo} contentFit="contain" />
+          <OrdinaMark size={36} />
           <ThemedText style={styles.headerText}>ORDINA AI</ThemedText>
         </View>
         <View style={[styles.pill, { backgroundColor: theme.backgroundSelected }]}>
@@ -795,7 +796,6 @@ const styles = StyleSheet.create({
   headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   headerText: { fontFamily: 'Poppins_600SemiBold', fontSize: 16 },
   iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  logo: { width: 32, height: 32 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 6 },
   pillText: { fontFamily: 'Poppins_600SemiBold', fontSize: 12 },
   chat: { padding: 16, gap: 12, paddingBottom: 24 },

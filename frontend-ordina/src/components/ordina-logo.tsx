@@ -16,7 +16,7 @@ export function OrdinaLogo({ size = 'md', style }: OrdinaLogoProps) {
   return (
     <View style={[styles.frame, sizes[size], style]}>
       <Image
-        source={require('@/assets/images/ordina-logo.png')}
+        source={require('@/assets/images/ordina-logo-transparent.png')}
         style={styles.image}
         contentFit="contain"
         accessibilityLabel="ORDINA. Put order in your day."
@@ -27,9 +27,6 @@ export function OrdinaLogo({ size = 'md', style }: OrdinaLogoProps) {
 
 const styles = StyleSheet.create({
   frame: {
-    backgroundColor: '#000000',
-    borderRadius: 24,
-    overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
