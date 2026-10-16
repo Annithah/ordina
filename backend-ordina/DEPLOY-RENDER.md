@@ -15,25 +15,33 @@ Sources: render.com/docs/free, neon.com/docs/introduction/plans, ai.google.dev/g
 
 ## Steps (about 15 minutes)
 
-### 1. Neon database
+### 1. Neon database (done)
 
-1. Sign up at <https://neon.com> (GitHub sign-in works). Free plan.
-2. **Create project:** name `ordina`, Postgres version default, **region AWS Europe Central 1 (Frankfurt)**.
-3. On the project dashboard, open **Connect**. Choose database `neondb`, role `neondb_owner`, and turn **Connection pooling OFF** (Prisma migrations need the direct connection).
-4. Copy the connection string. It looks like
-   `postgresql://neondb_owner:…@ep-xxxx.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require`.
-   Keep it private: it is the database password.
+The Neon project **`flat-bonus-90867196`** (branch `production`, database `neondb`, region **AWS us-east-2, Ohio**) is linked to this folder (`neon.ts`, `.neon`), and the migrations are applied.
+
+Neon gives two connection strings. Both contain the database password, so keep them private:
+
+| Render variable | Which string | How to recognise it | Used for |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | **Pooled** | host contains `-pooler` | The running server (Neon's recommendation for web apps) |
+| `DATABASE_URL_UNPOOLED` | **Direct** | host has no `-pooler` | Database migrations at start-up |
+
+Where to copy them from (either place):
+
+- **Your computer:** `backend-ordina/.env`, the lines `DATABASE_URL=` and `DATABASE_URL_UNPOOLED=` (written by `neon deploy`, never committed).
+- **Neon console:** <https://console.neon.tech> → project `flat-bonus-90867196` → **Connect** → branch `production`, database `neondb`, role `neondb_owner`. **Connection pooling ON** gives `DATABASE_URL`; **OFF** gives `DATABASE_URL_UNPOOLED`.
 
 ### 2. Render web service
 
 1. Sign up at <https://render.com> with the **Annithah** GitHub account (the one that owns the repo). Free plan.
 2. **New + → Blueprint →** connect `Annithah/ordina`. Render reads `render.yaml` from the repo root and proposes the service `ordina-api` (free plan, Node, root `backend-ordina`, branch `frontend-ordina-001`).
-3. It asks for the two secret values:
-   - `DATABASE_URL`: the Neon connection string from step 1.
+3. It asks for the three secret values:
+   - `DATABASE_URL`: the Neon **pooled** string from step 1.
+   - `DATABASE_URL_UNPOOLED`: the Neon **direct** string from step 1.
    - `GEMINI_API_KEY`: your Gemini key (same variable name as in your local `.env`).
 
    `JWT_SECRET` is generated automatically. `NODE_ENV=production` and `GEMINI_MODEL` are preset.
-4. If Render asks for a region, choose **Frankfurt (EU Central)** so the server sits next to the database.
+4. The blueprint puts the service in **Ohio**, the same AWS region as the Neon database (us-east-2). Keep it there.
 5. Click **Apply**. The first build takes a few minutes. In **Logs** you should see:
    - `All migrations have been successfully applied`
    - `ORDINA AI: Gemini model gemini-3.8-flash`
@@ -44,7 +52,7 @@ Send the URL back. It goes into `frontend-ordina/eas.json` as `EXPO_PUBLIC_API_U
 
 ## What production mode does
 
-- Runs `prisma migrate deploy` on every start (`npm run start:prod`), then starts the server.
+- Runs `prisma migrate deploy` on every start (`npm run start:prod`, over the direct connection), then starts the server (pooled connection).
 - Refuses to start without a strong `JWT_SECRET` (Render generates one).
 - Rate limits: 200/min overall, 30/min for AI, 20 per 15 min for sign-in, password reset and account deletion.
 - No browser CORS unless `CORS_ORIGINS` is set (the Android app needs none).

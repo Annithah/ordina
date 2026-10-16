@@ -17,7 +17,7 @@ ORDINA AI helps you plan your day. You create tasks yourself, or describe your d
 
 | Data | Why | Where it is stored |
 | --- | --- | --- |
-| **Account:** name, email address, password (stored only as a one-way argon2 hash, never in plain text), time zone | Sign-in, showing your tasks at the right local time | Our database (Neon, PostgreSQL, EU – Frankfurt) |
+| **Account:** name, email address, password (stored only as a one-way argon2 hash, never in plain text), time zone | Sign-in, showing your tasks at the right local time | Our database (Neon, PostgreSQL, USA – Ohio) |
 | **Tasks:** title, description, date, start time, duration, priority, category, deadline, completed status | The core app feature | Our database |
 | **ORDINA AI conversation:** what you type to ORDINA AI, its short replies, the answers you give to its questions | Showing your recent AI conversation and planning the request | Our database |
 | **Planning preferences:** a small profile learned from your own tasks and from the AI suggestions you correct (for example "usually exercises at 06:00 for 45 minutes"), plus a record of those corrections | Making future plans match your habits | Our database. Used only for your own account |
@@ -47,11 +47,11 @@ ORDINA AI uses the **Google Gemini API** to understand your requests. When you u
 
 | Provider | Role | Location |
 | --- | --- | --- |
-| Render | Hosts the ORDINA AI server | EU (Frankfurt) |
-| Neon | Hosts the PostgreSQL database | EU (Frankfurt) |
+| Render | Hosts the ORDINA AI server | USA (Ohio) |
+| Neon | Hosts the PostgreSQL database | USA (Ohio, AWS us-east-2) |
 | Google (Gemini API) | AI processing as described in section 3 | Google infrastructure |
 
-TODO: confirm the regions you actually chose when creating the Render service and Neon project.
+TODO: confirm the Render region shown on your service page (the blueprint uses Ohio).
 
 ## 5. Security
 

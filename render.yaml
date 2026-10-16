@@ -5,6 +5,7 @@ services:
     name: ordina-api
     runtime: node
     plan: free
+    region: ohio # same AWS region as the Neon project (us-east-2)
     rootDir: backend-ordina
     branch: frontend-ordina-001
     buildCommand: npm ci
@@ -20,7 +21,9 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: DATABASE_URL
-        sync: false # Neon connection string, entered in the Render dashboard
+        sync: false # Neon POOLED connection string (host contains "-pooler"), used by the server
+      - key: DATABASE_URL_UNPOOLED
+        sync: false # Neon DIRECT connection string (no "-pooler"), used only for migrations
       - key: GEMINI_API_KEY
         sync: false # entered in the Render dashboard
       - key: GEMINI_MODEL
