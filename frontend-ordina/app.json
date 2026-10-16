@@ -13,22 +13,11 @@
     "scheme": "ordina",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/images/ordina-icon.png",
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.ordina.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "splash": {
-        "image": "./assets/images/ordina-logo-transparent.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#F8FAFC",
-        "dark": {
-          "image": "./assets/images/ordina-logo-transparent-dark.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
       }
     },
     "android": {
@@ -49,17 +38,7 @@
       "blockedPermissions": [
         "android.permission.WRITE_CONTACTS",
         "android.permission.ACCESS_BACKGROUND_LOCATION"
-      ],
-      "splash": {
-        "image": "./assets/images/ordina-logo-transparent.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#F8FAFC",
-        "dark": {
-          "image": "./assets/images/ordina-logo-transparent-dark.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
-      }
+      ]
     },
     "web": {
       "output": "static",
@@ -124,11 +103,6 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    },
-    "splash": {
-      "image": "./assets/images/ordina-logo-transparent.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F8FAFC"
     },
     "extra": {
       "router": {},
