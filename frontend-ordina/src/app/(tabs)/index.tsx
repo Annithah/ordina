@@ -18,6 +18,7 @@ import { api } from '@/services/api';
 import { localDateKey, addLocalDays } from '@/utils/dates';
 import { HEALTH_LABEL, healthColor, summarize, taskHealth } from '@/utils/task-health';
 import { friendlyError } from '@/utils/task-validation';
+import { FEATURES } from '@/config/release';
 
 function StatusBar({ counts, colors }: {
   counts: { completed: number; inProgress: number; overdue: number };
@@ -183,13 +184,15 @@ export default function HomeScreen() {
         <View style={[styles.overview, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.overviewHeader}>
             <ThemedText style={[styles.sectionTitle, styles.overviewTitle]}>Dashboard</ThemedText>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => router.push('/integrations')}
-              style={styles.integrationsLink}>
-              <Ionicons name="git-network-outline" size={16} color={theme.primary} />
-              <ThemedText style={{ color: theme.primary }}>Integrations</ThemedText>
-            </Pressable>
+            {FEATURES.integrations ? (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => router.push('/integrations')}
+                style={styles.integrationsLink}>
+                <Ionicons name="git-network-outline" size={16} color={theme.primary} />
+                <ThemedText style={{ color: theme.primary }}>Integrations</ThemedText>
+              </Pressable>
+            ) : null}
           </View>
           <ThemedText themeColor="textSecondary" style={styles.dateText}>
             Today · {todaysTasks.length} task{todaysTasks.length === 1 ? '' : 's'}
@@ -240,17 +243,19 @@ export default function HomeScreen() {
             <ThemedText style={styles.workspaceCount}>{activeGoals.length}</ThemedText>
             <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/reminders')}
-            style={[styles.workspaceRow, { borderBottomColor: theme.border }]}>
-            <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
-              <Ionicons name="alarm-outline" size={18} color={theme.primary} />
-            </View>
-            <ThemedText style={styles.workspaceLabel}>Active reminders</ThemedText>
-            <ThemedText style={styles.workspaceCount}>{activeReminders.length}</ThemedText>
-            <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
-          </Pressable>
+          {FEATURES.reminders ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/reminders')}
+              style={[styles.workspaceRow, { borderBottomColor: theme.border }]}>
+              <View style={[styles.workspaceIcon, { backgroundColor: theme.backgroundElement }]}>
+                <Ionicons name="alarm-outline" size={18} color={theme.primary} />
+              </View>
+              <ThemedText style={styles.workspaceLabel}>Active reminders</ThemedText>
+              <ThemedText style={styles.workspaceCount}>{activeReminders.length}</ThemedText>
+              <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
+            </Pressable>
+          ) : null}
           <Pressable
             accessibilityRole="button"
             onPress={() => router.push('/notifications')}

@@ -12,11 +12,13 @@ import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
 import { routeAfterAuth } from '@/utils/after-auth';
+import { FEATURES } from '@/config/release';
 
 export default function SignInScreen() {
   const theme = useTheme();
   const signIn = useAuthStore((s) => s.signIn);
-  const [showEmail, setShowEmail] = useState(false);
+  // Without Google / Apple sign-in the email form is the only option, so show it straight away.
+  const [showEmail, setShowEmail] = useState(!FEATURES.socialSignIn);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -51,21 +53,23 @@ export default function SignInScreen() {
           <View style={styles.heading}>
             <ThemedText style={styles.title}>Put order in your day</ThemedText>
             <ThemedText themeColor="textSecondary" style={styles.subtitle}>
-              Sign in with the account you already use. No new password needed.
+              {FEATURES.socialSignIn
+                ? 'Sign in with the account you already use. No new password needed.'
+                : 'Sign in with your email to plan your day.'}
             </ThemedText>
           </View>
 
-          <SocialAuthButtons />
+          {FEATURES.socialSignIn ? <SocialAuthButtons /> : null}
 
           {showEmail ? (
             <View style={styles.emailForm}>
-              <View style={styles.dividerRow}>
+              {FEATURES.socialSignIn ? <View style={styles.dividerRow}>
                 <View style={[styles.line, { backgroundColor: theme.border }]} />
                 <ThemedText themeColor="textSecondary" style={styles.or}>
                   or with email
                 </ThemedText>
                 <View style={[styles.line, { backgroundColor: theme.border }]} />
-              </View>
+              </View> : null}
               <AuthField
                 label="Email Address"
                 placeholder="you@example.com"
@@ -106,8 +110,9 @@ export default function SignInScreen() {
           )}
 
           <ThemedText themeColor="textSecondary" style={styles.legal}>
-            By continuing you agree to ORDINA&apos;s Terms and Privacy Policy. ORDINA only reads your calendar and
-            contacts when you connect them.
+            {FEATURES.integrations
+              ? 'By continuing you agree to ORDINA’s Terms and Privacy Policy. ORDINA only reads your calendar and contacts when you connect them.'
+              : 'By continuing you agree to ORDINA’s Terms and Privacy Policy.'}
           </ThemedText>
         </ScrollView>
       </KeyboardAvoidingView>

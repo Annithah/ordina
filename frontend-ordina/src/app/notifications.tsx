@@ -34,7 +34,7 @@ export default function NotificationsScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <ThemedText style={styles.title}>Notifications</ThemedText>
         <Pressable onPress={() => void markAllNotificationsRead()}>

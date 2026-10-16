@@ -12,6 +12,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
 import { usePreferencesStore, type OnboardingAnswers } from '@/store/preferences-store';
 import { href } from '@/utils/href';
+import { FEATURES } from '@/config/release';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 type Option = { id: string; label: string; icon: IconName };
@@ -198,7 +199,7 @@ export default function OnboardingScreen() {
             ) : (
               <>
             <ThemedText style={styles.sectionLabel}>Create your free account</ThemedText>
-            <SocialAuthButtons />
+            {FEATURES.socialSignIn ? <SocialAuthButtons /> : null}
             <Pressable
               onPress={() => void goTo('/sign-up')}
               style={[styles.emailButton, { borderColor: theme.border, backgroundColor: theme.card }]}>

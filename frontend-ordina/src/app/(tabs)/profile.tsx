@@ -19,6 +19,7 @@ import { deleteAccount } from '@/services/ai';
 import { disconnectGoogleCalendar } from '@/services/google-calendar';
 import { useAuthStore } from '@/store/auth-store';
 import { LOCALES } from '@/i18n/translations';
+import { FEATURES } from '@/config/release';
 
 const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL;
 
@@ -137,11 +138,13 @@ export default function ProfileScreen() {
         {/* Connections */}
         <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <SectionLabel title="CONNECTIONS" />
-          <SettingRow
-            label="Google Calendar, contacts & permissions"
-            onPress={() => router.push(href('/integrations'))}
-          />
-          <SettingRow label="Reminders" onPress={() => router.push(href('/reminders'))} />
+          {FEATURES.integrations ? (
+            <SettingRow
+              label="Google Calendar, contacts & permissions"
+              onPress={() => router.push(href('/integrations'))}
+            />
+          ) : null}
+          {FEATURES.reminders ? <SettingRow label="Reminders" onPress={() => router.push(href('/reminders'))} /> : null}
           <SettingRow label="Replay introduction" onPress={() => router.push(href('/onboarding'))} />
         </View>
 
@@ -200,16 +203,20 @@ export default function ProfileScreen() {
           <ThemedText style={styles.notifLinkText}>Manage Goals</ThemedText>
           <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
         </Pressable>
-        <Pressable onPress={() => router.push(href('/integrations'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="phone-portrait-outline" size={20} color={theme.primary} />
-          <ThemedText style={styles.notifLinkText}>Phone integrations</ThemedText>
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
-        <Pressable onPress={() => router.push(href('/reminders'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="alarm-outline" size={20} color={theme.primary} />
-          <ThemedText style={styles.notifLinkText}>Manage Reminders</ThemedText>
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
+        {FEATURES.integrations ? (
+          <Pressable onPress={() => router.push(href('/integrations'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Ionicons name="phone-portrait-outline" size={20} color={theme.primary} />
+            <ThemedText style={styles.notifLinkText}>Phone integrations</ThemedText>
+            <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
+        {FEATURES.reminders ? (
+          <Pressable onPress={() => router.push(href('/reminders'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Ionicons name="alarm-outline" size={20} color={theme.primary} />
+            <ThemedText style={styles.notifLinkText}>Manage Reminders</ThemedText>
+            <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
+          </Pressable>
+        ) : null}
 
         <ThemedText themeColor="textSecondary" style={styles.version}>
           ORDINA v1.0.0 • Put order in your day
