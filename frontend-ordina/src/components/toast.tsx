@@ -7,7 +7,7 @@ import { create } from 'zustand';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 
-type ToastKind = 'success' | 'error';
+type ToastKind = 'success' | 'error' | 'info';
 
 type ToastState = {
   toast: { id: number; kind: ToastKind; message: string } | null;
@@ -25,6 +25,7 @@ const useToastStore = create<ToastState>((set) => ({
 export const toast = {
   success: (message: string) => useToastStore.getState().show('success', message),
   error: (message: string) => useToastStore.getState().show('error', message),
+  info: (message: string) => useToastStore.getState().show('info', message),
 };
 
 export function ToastHost() {
@@ -35,12 +36,12 @@ export function ToastHost() {
 
   useEffect(() => {
     if (!current) return;
-    const timer = setTimeout(hide, current.kind === 'error' ? 5000 : 2500);
+    const timer = setTimeout(hide, current.kind === 'success' ? 2500 : 4000);
     return () => clearTimeout(timer);
   }, [current, hide]);
 
   if (!current) return null;
-  const color = current.kind === 'success' ? theme.success : theme.danger;
+  const color = current.kind === 'success' ? theme.success : current.kind === 'info' ? theme.primary : theme.danger;
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { top: insets.top + 8 }]}>
       <Pressable
@@ -48,7 +49,7 @@ export function ToastHost() {
         accessibilityLiveRegion="polite"
         onPress={hide}
         style={[styles.toast, { backgroundColor: theme.card, borderColor: color }]}>
-        <Ionicons name={current.kind === 'success' ? 'checkmark-circle' : 'alert-circle'} size={20} color={color} />
+        <Ionicons name={current.kind === 'success' ? 'checkmark-circle' : current.kind === 'info' ? 'information-circle' : 'alert-circle'} size={20} color={color} />
         <ThemedText style={styles.text}>{current.message}</ThemedText>
       </Pressable>
     </View>

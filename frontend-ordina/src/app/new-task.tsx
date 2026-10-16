@@ -1,7 +1,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import * as Crypto from 'expo-crypto';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ContactActions } from '@/components/contact-actions';
+import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
@@ -40,7 +42,13 @@ import {
   timeFromMinutes,
 } from '@/utils/task-planning';
 import { DESCRIPTION_MAX, TITLE_MAX, friendlyError, validateTaskForm, type TaskFieldErrors } from '@/utils/task-validation';
-import { FEATURES } from '@/config/release';
+import { FEATURES, LOCAL_MODE } from '@/config/release';
+import { isTimeOver, parsedToDrafts } from '@/features/tasks/parsed-drafts';
+import { PARSED_TITLE_MAX, PLAN_INPUT_MAX, parseTasks } from '@/features/tasks/parseTasks';
+import { confirmPlan } from '@/services/ai';
+import { confirmLocalPlan } from '@/services/local-tasks';
+import type { DraftTask } from '@/types/plan';
+import { toConfirmPayload } from '@/utils/plan-draft';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -181,7 +189,7 @@ export default function NewTaskScreen() {
 function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; presetDate?: string; presetTime?: string }) {
   const theme = useTheme();
   const isSignedIn = useAuthStore((s) => s.isSignedIn);
-  const { tasks, addTask, updateTask, deleteTask } = useTasksStore();
+  const { tasks, addTask, updateTask, deleteTask, loadTasks } = useTasksStore();
   const isEditMode = Boolean(taskToEdit);
 
   const [title, setTitle] = useState(taskToEdit?.title ?? '');
@@ -208,8 +216,13 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const [deadline, setDeadline] = useState<string | null>(taskToEdit?.deadline ?? null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Several activities written as one text: reviewed here before anything is saved.
+  const [preview, setPreview] = useState<{ planId: string; drafts: DraftTask[] } | null>(null);
+  const [savingPreview, setSavingPreview] = useState(false);
+  const savingPreviewRef = useRef(false);
 
   const detected = useMemo(() => detectSchedule(title), [title]);
+  const plannedCount = useMemo(() => (isEditMode ? 0 : parseTasks(title).length), [isEditMode, title]);
   const clashes = useMemo(
     () => findClashes(tasks, dueDate, startTime || undefined, minutes, taskToEdit?.id),
     [tasks, dueDate, startTime, minutes, taskToEdit?.id],
@@ -298,7 +311,23 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
 
   async function saveTask() {
     if (saving) return;
-    const found = validateTaskForm({ title, description: notes, dueDate, startTime, durationMinutes: minutes });
+    let taskTitle = title.trim();
+    let taskNotes = notes.trim();
+    if (!isEditMode) {
+      const parsed = parseTasks(title);
+      if (parsed.length > 1) {
+        setErrors({});
+        setSaveError(null);
+        setPreview({ planId: Crypto.randomUUID(), drafts: parsedToDrafts(parsed) });
+        return;
+      }
+      // One long activity: a short title, with the full text kept as the description.
+      if (taskTitle.length > PARSED_TITLE_MAX && parsed.length === 1) {
+        if (!taskNotes) taskNotes = taskTitle;
+        taskTitle = parsed[0].title;
+      }
+    }
+    const found = validateTaskForm({ title: taskTitle, description: taskNotes, dueDate, startTime, durationMinutes: minutes });
     setErrors(found);
     setSaveError(null);
     if (Object.keys(found).length) return;
@@ -308,8 +337,8 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     }
     const repeat = REPEATS.find((item) => item.id === repeatId) ?? REPEATS[0];
     const payload = {
-      title: title.trim(),
-      description: notes.trim(),
+      title: taskTitle,
+      description: taskNotes,
       status: taskToEdit?.status ?? 'todo',
       priority,
       category,
@@ -359,6 +388,30 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     router.back();
   }
 
+  /** Saves every previewed task in one go; the plan id stops a double tap from adding them twice. */
+  async function savePreviewTasks() {
+    if (!preview || savingPreviewRef.current) return;
+    if (!isSignedIn) {
+      router.replace('/sign-in');
+      return;
+    }
+    savingPreviewRef.current = true;
+    setSavingPreview(true);
+    const payload = toConfirmPayload(preview.drafts);
+    try {
+      if (LOCAL_MODE) await confirmLocalPlan(preview.planId, payload);
+      else await confirmPlan(preview.planId, payload);
+    } catch (error) {
+      savingPreviewRef.current = false;
+      setSavingPreview(false);
+      toast.error(friendlyError(error, 'Could not save the tasks. Please try again.'));
+      return;
+    }
+    await loadTasks().catch(() => undefined);
+    toast.success(`${payload.length} tasks added to your plan`);
+    router.back();
+  }
+
   async function removeTask() {
     if (!taskToEdit || deleting) return;
     setDeleting(true);
@@ -379,6 +432,46 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     startTime ? formatTime12(startTime) : 'Any time',
     formatDuration(minutes),
   ].join(' · ');
+
+  if (preview) {
+    const count = preview.drafts.length;
+    return (
+      <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
+        <View style={styles.header}>
+          <Pressable accessibilityLabel="Back to your text" disabled={savingPreview} onPress={() => setPreview(null)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+            <Ionicons name="arrow-back" size={20} color={theme.text} />
+          </Pressable>
+          <ThemedText style={styles.headerTitle}>New tasks</ThemedText>
+          <View style={styles.iconBtn} />
+        </View>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+          <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
+            <PlanReview
+              heading={count === 1 ? 'ORDINA found 1 task' : `ORDINA found ${count} tasks`}
+              subheading="Check them before saving. Tap a task to change it, or remove it."
+              summary={title}
+              tasks={preview.drafts}
+              questions={[]}
+              assumptions={[]}
+              answers={{}}
+              today={localDateKey()}
+              saving={savingPreview}
+              replanning={false}
+              groupByDay
+              titleMax={PARSED_TITLE_MAX}
+              needsNewTime={(task) => isTimeOver(task)}
+              confirmLabel={(n) => (n === 1 ? 'Create 1 task' : `Create ${n} tasks`)}
+              onChangeTasks={(drafts) => setPreview((current) => (current ? { ...current, drafts } : current))}
+              onAnswer={() => undefined}
+              onSubmitAnswers={() => undefined}
+              onConfirm={() => void savePreviewTasks()}
+              onCancel={() => setPreview(null)}
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -405,18 +498,33 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
                 setTitle(text);
                 if (errors.title) setErrors(({ title: _cleared, ...rest }) => rest);
               }}
-              placeholder="What do you need to do?"
+              placeholder={isEditMode ? 'What do you need to do?' : 'What do you need to do? You can write your whole plan.'}
               placeholderTextColor={theme.textSecondary}
-              accessibilityLabel="Task title"
+              accessibilityLabel={isEditMode ? 'Task title' : 'Task or plan'}
               autoFocus={!isEditMode}
-              maxLength={TITLE_MAX}
+              maxLength={isEditMode ? TITLE_MAX : PLAN_INPUT_MAX}
               multiline
+              scrollEnabled
               style={[styles.titleInput, { color: theme.text }]}
             />
+            {!isEditMode && title.length >= PLAN_INPUT_MAX - 200 ? (
+              <ThemedText
+                accessibilityLiveRegion="polite"
+                style={[styles.counter, { color: title.length >= PLAN_INPUT_MAX ? theme.danger : theme.textSecondary }]}>
+                {title.length} / {PLAN_INPUT_MAX}
+              </ThemedText>
+            ) : null}
             {errors.title ? (
               <ThemedText accessibilityRole="alert" style={[styles.fieldError, { color: theme.danger }]}>{errors.title}</ThemedText>
             ) : null}
-            {detected && (detected.date !== dueDate || (detected.time && detected.time !== startTime)) ? (
+            {plannedCount > 1 ? (
+              <View style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
+                <Ionicons name="list" size={14} color={theme.primary} />
+                <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
+                  {plannedCount} tasks found. You can check them before saving.
+                </ThemedText>
+              </View>
+            ) : detected && (detected.date !== dueDate || (detected.time && detected.time !== startTime)) ? (
               <Pressable onPress={applyDetected} style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="flash" size={14} color={theme.primary} />
                 <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
@@ -426,7 +534,9 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
               </Pressable>
             ) : (
               <ThemedText themeColor="textSecondary" style={styles.tip}>
-                Tip: type “tomorrow at 7am” and ORDINA fills in the time.
+                {isEditMode
+                  ? 'Tip: type “tomorrow at 7am” and ORDINA fills in the time.'
+                  : 'Tip: write several things, like “gym at 6pm, then call mom”, and ORDINA makes separate tasks.'}
               </ThemedText>
             )}
             <TextInput
@@ -623,7 +733,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             {repeatId !== 'none' ? ' · 🔁' : ''}
           </ThemedText>
           <PrimaryButton
-            label={saving ? 'Saving…' : isEditMode ? 'Save changes' : 'Create task'}
+            label={saving ? 'Saving…' : isEditMode ? 'Save changes' : plannedCount > 1 ? `Review ${plannedCount} tasks` : 'Create task'}
             disabled={saving}
             onPress={() => void saveTask()}
           />
@@ -675,7 +785,8 @@ const styles = StyleSheet.create({
   iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   form: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
   titleCard: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 8 },
-  titleInput: { fontSize: 20, fontFamily: 'Poppins_600SemiBold', paddingVertical: 4, minHeight: 36 },
+  titleInput: { fontSize: 20, fontFamily: 'Poppins_600SemiBold', paddingVertical: 4, minHeight: 36, maxHeight: 260, textAlignVertical: 'top' },
+  counter: { alignSelf: 'flex-end', fontSize: 12, fontFamily: 'Poppins_500Medium' },
   detected: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   detectedText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold' },
   detectedHint: { fontSize: 11 },

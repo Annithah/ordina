@@ -8,9 +8,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { href } from '@/utils/href';
 import * as Linking from 'expo-linking';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useState } from 'react';
+import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AccountPanel, AccountPrompt } from '@/components/account-panel';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { useAppTheme } from '@/providers/theme-provider';
@@ -25,6 +28,27 @@ import { toast } from '@/components/toast';
 import { useTasksStore } from '@/store/tasks-store';
 
 const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL;
+// Remembers "Continue without an account" so the account screen doesn't open every time.
+const ACCOUNT_SKIPPED_KEY = 'ordina.accountSkipped';
+
+/** Account screen state (design only: sign-in is not connected yet). */
+function useAccountScreen() {
+  const [skipped, setSkipped] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    SecureStore.getItemAsync(ACCOUNT_SKIPPED_KEY)
+      .then((value) => alive && setSkipped(value === '1'))
+      .catch(() => alive && setSkipped(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const update = (value: boolean) => {
+    setSkipped(value);
+    void (value ? SecureStore.setItemAsync(ACCOUNT_SKIPPED_KEY, '1') : SecureStore.deleteItemAsync(ACCOUNT_SKIPPED_KEY)).catch(() => undefined);
+  };
+  return { skipped, skip: () => update(true), open: () => update(false) };
+}
 
 interface SettingRowProps {
   label: string;
@@ -75,6 +99,9 @@ export default function ProfileScreen() {
   const signOut = useAuthStore((s) => s.signOut);
   const loadTasks = useTasksStore((s) => s.loadTasks);
   const languageLabel = LOCALES.find((item) => item.id === locale)?.native ?? 'English';
+  // Offline build: no real account yet, so show the account screen instead of the user card.
+  const account = useAccountScreen();
+  const showAccountDesign = !FEATURES.accounts;
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
@@ -86,12 +113,17 @@ export default function ProfileScreen() {
         </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[styles.scroll, { paddingBottom: 100 }]}
       >
+        {showAccountDesign && account.skipped === false ? <AccountPanel onSkip={account.skip} /> : null}
+        {showAccountDesign && account.skipped ? <AccountPrompt onOpen={account.open} /> : null}
+
         {/* User card */}
-        <View style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        {!showAccountDesign ? <View style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
             <ThemedText style={styles.avatarText}>
               {(user?.name ?? 'O').slice(0, 1).toUpperCase()}
@@ -103,7 +135,7 @@ export default function ProfileScreen() {
               {user?.email ?? t('profile.signInHint')}
             </ThemedText>
           </View>
-        </View>
+        </View> : null}
 
         {/* Preferences */}
         <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -253,6 +285,7 @@ export default function ProfileScreen() {
           ORDINA v1.0.0 • Put order in your day
         </ThemedText>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
