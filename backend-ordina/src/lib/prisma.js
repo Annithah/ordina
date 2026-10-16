@@ -1,30 +1,15 @@
 require('dotenv/config');
 
-const fs = require('fs');
-const path = require('path');
 const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('DATABASE_URL is missing. Copy backend-ordina/.env.example to .env');
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl || !/^postgres(ql)?:\/\//i.test(databaseUrl)) {
+  throw new Error('DATABASE_URL must be a PostgreSQL connection string (Neon in production, `prisma dev` locally). See backend-ordina/.env.example');
 }
 
-function createAdapter() {
-  const databaseUrl = process.env.DATABASE_URL;
-  if (/^(libsql|https|wss):/i.test(databaseUrl)) {
-    const { PrismaLibSql } = require('@prisma/adapter-libsql');
-    return new PrismaLibSql({ url: databaseUrl, authToken: process.env.DATABASE_AUTH_TOKEN });
-  }
-
-  const { PrismaBetterSqlite3 } = require('@prisma/adapter-better-sqlite3');
-  const relative = databaseUrl.replace(/^file:/i, '').replace(/^\/\/\//, '').replace(/^\/\//, '');
-  const backendRoot = path.resolve(__dirname, '..', '..');
-  const absolute = path.isAbsolute(relative) ? relative : path.resolve(backendRoot, relative);
-  fs.mkdirSync(path.dirname(absolute), { recursive: true });
-  return new PrismaBetterSqlite3({ url: absolute });
-}
-
-console.log('ORDINA db: connecting...');
-const prisma = new PrismaClient({ adapter: createAdapter() });
-console.log('ORDINA db: client ready');
+// Neon suspends idle databases, so allow a few seconds for the first connection to wake it.
+const adapter = new PrismaPg({ connectionString: databaseUrl, connectionTimeoutMillis: 15_000, max: 5 });
+const prisma = new PrismaClient({ adapter });
 
 module.exports = prisma;

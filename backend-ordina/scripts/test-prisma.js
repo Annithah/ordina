@@ -1,16 +1,10 @@
 require('dotenv/config');
 
 const assert = require('node:assert/strict');
-const { PrismaLibSql } = require('@prisma/adapter-libsql');
-const { PrismaClient } = require('@prisma/client');
-const { ensureSchema } = require('../src/lib/ensure-schema');
-
-const adapter = new PrismaLibSql({ url: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+// Uses the same PostgreSQL client as the server (DATABASE_URL); cleans up after itself.
+const prisma = require('../src/lib/prisma');
 
 async function run() {
-  await ensureSchema(prisma);
-
   const email = `prisma-${process.pid}@example.com`;
   const user = await prisma.user.create({
     data: { email, passwordHash: 'hash', displayName: 'Prisma Test' }
@@ -22,7 +16,7 @@ async function run() {
     data: {
       userId: user.id,
       title: 'Verify Prisma CRUD',
-      description: 'Exercise the SQLite database through Prisma',
+      description: 'Exercise the PostgreSQL database through Prisma',
       priority: 2,
       categories: { create: { categoryId: category.id } }
     },
@@ -40,7 +34,7 @@ async function run() {
   assert.equal(await prisma.task.count({ where: { id: task.id } }), 0);
   assert.equal(await prisma.category.count({ where: { id: category.id } }), 0);
   assert.equal(await prisma.taskCategory.count({ where: { taskId: task.id } }), 0);
-  console.log('Prisma SQLite connectivity and CRUD checks passed.');
+  console.log('Prisma PostgreSQL connectivity and CRUD checks passed.');
 }
 
 run()

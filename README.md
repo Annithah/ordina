@@ -16,7 +16,7 @@ ORDINA turns natural-language (and optional voice) instructions into real tasks,
 
 ## Run locally
 
-Need **Node.js 20+**. Use **two terminals**.
+Need **Node.js 24**. Use **two terminals**.
 
 ### 1. API
 
@@ -24,10 +24,12 @@ Need **Node.js 20+**. Use **two terminals**.
 cd backend-ordina
 copy .env.example .env   # Windows
 npm install
-npm run db:generate
-npm run db:setup
+npm run db:dev      # local PostgreSQL via `prisma dev` (once per session)
+npm run db:setup    # apply migrations
 npm run dev
 ```
+
+The database is PostgreSQL: local `prisma dev` for development, Neon in production.
 
 Health check: [http://localhost:4000/api/health](http://localhost:4000/api/health)
 
@@ -65,7 +67,7 @@ The **mobile app never holds the Gemini key**. The API calls Gemini.
 | `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_ANDROID_CLIENT_ID` | same file | Verify native Google ID tokens |
 | `APPLE_CLIENT_ID`, `APPLE_BUNDLE_ID` | same file | Verify Sign in with Apple |
 | `SMTP_HOST` | same file | Send password-reset codes by email |
-| `DATABASE_URL` | same file | SQLite file, default `file:./data/ordina.sqlite` |
+| `DATABASE_URL` | same file | PostgreSQL connection string (local `prisma dev`, or Neon in production) |
 | `EXPO_PUBLIC_GOOGLE_CLIENT_ID` | `frontend-ordina/.env` | Google Web OAuth client for sign-in and Calendar |
 | `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID`, `EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID` | same file | Native Google OAuth clients for sign-in and Calendar |
 
@@ -89,7 +91,7 @@ ORDINA proposes four dated tasks. You tap **Confirm & save**.
 ```text
 MobileApplication/
   frontend-ordina/   Expo Router (SDK 57)
-  backend-ordina/    Express + Prisma + SQLite
+  backend-ordina/    Express + Prisma + PostgreSQL
 ```
 
 ## API (authenticated unless noted)
@@ -139,10 +141,9 @@ See `backend-ordina/DATABASE.md`. Do not wipe production data; only additive Pri
 
 Figma: [ORDINA_APP](https://www.figma.com/design/SCVeMG4DD2DVHn5QAk3gbW/ORDINA_APP?node-id=0-1)
 
-## Publishing to Google Play
+## Release builds
 
-1. **Host the API** on a public HTTPS server (Render, Railway, Fly.io, a VPS…). Set `GEMINI_API_KEY`, `JWT_SECRET` (long random value), Google client IDs and `DATABASE_URL`. For production use a persistent volume for SQLite or a hosted libSQL/Turso URL.
-2. In `frontend-ordina/.env` set `EXPO_PUBLIC_API_URL=https://your-api-domain`, the Google client IDs, and `EXPO_PUBLIC_PRIVACY_POLICY_URL`.
-3. In Google Cloud, create the **Android** OAuth client for package `com.ordina.app` with the SHA-1 of the Play **app signing** key (Play Console → App integrity), and submit the consent screen (Calendar scope) for verification.
-4. Build and submit: `npx eas-cli build -p android --profile production`, then `npx eas-cli submit -p android --profile production` (uploads a draft to the internal testing track).
-5. In Play Console complete Data safety (contacts names/numbers matched on-device, audio/photos/videos sent to the API for AI processing, calendar via Google), add the privacy policy URL, and give reviewers a test account (email sign-in remains available under “Use email instead”). Account deletion is in **Profile → Delete account**.
+1. **Backend (free):** Render web service + Neon Postgres. Step-by-step guide: [`backend-ordina/DEPLOY-RENDER.md`](backend-ordina/DEPLOY-RENDER.md). The blueprint is [`render.yaml`](render.yaml).
+2. Put the Render HTTPS URL into `EXPO_PUBLIC_API_URL` in [`frontend-ordina/eas.json`](frontend-ordina/eas.json) (`preview` and `production` profiles). The store build refuses to build without an HTTPS address.
+3. **Installable APK** for your own phone (EAS free plan): `npx eas-cli build -p android --profile preview`.
+4. **Google Play (later):** the `production` profile builds an `.aab` (`npx eas-cli build -p android --profile production`). Store build scope (Tasks + ORDINA AI only, microphone permission only) is set in [`frontend-ordina/src/config/release.ts`](frontend-ordina/src/config/release.ts) and [`frontend-ordina/app.config.js`](frontend-ordina/app.config.js). The privacy policy draft is in [`store/privacy-policy.md`](store/privacy-policy.md).
