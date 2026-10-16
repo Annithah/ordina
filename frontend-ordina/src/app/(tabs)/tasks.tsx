@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { OrdinaMark } from '@/components/ordina-mark';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
@@ -202,7 +203,7 @@ export default function TasksScreen() {
             accessibilityLabel="Plan with ORDINA AI"
             onPress={() => router.push('/ai')}
             style={styles.aiButton}>
-            <Ionicons name="sparkles" size={16} color={theme.primary} />
+            <OrdinaMark size={24} />
             <ThemedText style={[styles.aiButtonText, { color: theme.primary }]}>Plan with AI</ThemedText>
           </Pressable>
         </View>
@@ -309,7 +310,7 @@ export default function TasksScreen() {
                     accessibilityRole="button"
                     onPress={() => router.push('/ai')}
                     style={[styles.emptyButton, { backgroundColor: theme.backgroundSelected }]}>
-                    <Ionicons name="sparkles-outline" size={18} color={theme.primary} />
+                    <OrdinaMark size={24} />
                     <ThemedText style={[styles.emptyButtonText, { color: theme.primary }]}>Ask ORDINA AI</ThemedText>
                   </Pressable>
                 </View>
