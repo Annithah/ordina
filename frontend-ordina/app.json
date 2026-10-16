@@ -19,6 +19,16 @@
       "bundleIdentifier": "com.ordina.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "splash": {
+        "image": "./assets/images/ordina-logo-transparent.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#F8FAFC",
+        "dark": {
+          "image": "./assets/images/ordina-logo-transparent-dark.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
       }
     },
     "android": {
@@ -40,7 +50,17 @@
       "blockedPermissions": [
         "android.permission.WRITE_CONTACTS",
         "android.permission.ACCESS_BACKGROUND_LOCATION"
-      ]
+      ],
+      "splash": {
+        "image": "./assets/images/ordina-logo-transparent.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#F8FAFC",
+        "dark": {
+          "image": "./assets/images/ordina-logo-transparent-dark.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
+      }
     },
     "web": {
       "output": "static",
@@ -54,7 +74,11 @@
         {
           "backgroundColor": "#F8FAFC",
           "image": "./assets/images/ordina-logo-transparent.png",
-          "imageWidth": 200
+          "imageWidth": 200,
+          "dark": {
+            "image": "./assets/images/ordina-logo-transparent-dark.png",
+            "backgroundColor": "#000000"
+          }
         }
       ],
       "expo-secure-store",
@@ -99,6 +123,11 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "splash": {
+      "image": "./assets/images/ordina-logo-transparent.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F8FAFC"
     }
   }
 }
