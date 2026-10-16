@@ -9,9 +9,10 @@
     },
     "preview": {
       "distribution": "internal",
+      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_STORE_BUILD": "1",
-        "EXPO_PUBLIC_API_URL": "https://TODO-set-railway-domain"
+        "EXPO_PUBLIC_API_URL": "https://TODO-set-render-url"
       },
       "android": {
         "buildType": "apk"
@@ -21,7 +22,7 @@
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_STORE_BUILD": "1",
-        "EXPO_PUBLIC_API_URL": "https://TODO-set-railway-domain"
+        "EXPO_PUBLIC_API_URL": "https://TODO-set-render-url"
       },
       "android": {
         "buildType": "app-bundle"
