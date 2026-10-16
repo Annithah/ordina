@@ -115,6 +115,17 @@ function validateTaskInput(body, { partial = false } = {}) {
     else value.category = category || null;
   }
 
+  if (has('deadline')) {
+    const deadline = input.deadline;
+    if (deadline === null || deadline === '') {
+      value.deadline = null;
+    } else {
+      const [date, time] = String(deadline).split('T');
+      if (!isValidDateKey(date) || (time !== undefined && !isValidTime(time))) errors.deadline = 'Please choose a valid deadline.';
+      else value.deadline = time ? `${date}T${time}` : date;
+    }
+  }
+
   if (has('recurrence')) {
     if (!RECURRENCES.has(input.recurrence)) errors.recurrence = 'Unknown repeat option.';
     else value.recurrence = input.recurrence;

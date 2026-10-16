@@ -43,6 +43,13 @@ function byStartTime(a: Task, b: Task) {
   return am - bm;
 }
 
+function deadlineLabel(deadline: string) {
+  const [date, time] = deadline.split('T');
+  const day = friendlyDay(date);
+  if (time) return day === 'Today' ? `Due by ${formatTime12(time)}` : `Due ${day} by ${formatTime12(time)}`;
+  return day === 'Today' ? 'Due today' : `Due ${day}`;
+}
+
 function statusColor(status: TaskStatusLabel, theme: ReturnType<typeof useTheme>) {
   if (status === 'completed') return theme.success;
   if (status === 'overdue') return theme.danger;
@@ -85,6 +92,12 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (task: Task) => voi
           <ThemedText themeColor="textSecondary" style={styles.meta}>{time} · {formatDuration(minutes)}</ThemedText>
           <View style={[styles.dot, { backgroundColor: PRIORITY_COLOR[task.priority] }]} />
           <ThemedText themeColor="textSecondary" style={styles.meta}>{PRIORITY_LABEL[task.priority]}</ThemedText>
+          {task.deadline ? (
+            <>
+              <Ionicons name="flag-outline" size={13} color={theme.danger} accessibilityLabel="Deadline" />
+              <ThemedText style={[styles.meta, { color: theme.danger }]}>{deadlineLabel(task.deadline)}</ThemedText>
+            </>
+          ) : null}
           {task.parentTaskId || (task.recurrence && task.recurrence !== 'none') ? (
             <Ionicons name="repeat" size={13} color={theme.textSecondary} accessibilityLabel="Repeating task" />
           ) : null}

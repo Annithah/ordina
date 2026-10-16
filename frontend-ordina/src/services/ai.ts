@@ -1,5 +1,7 @@
 import { api } from '@/services/api';
 import type { CalendarBusyEvent } from '@/services/google-calendar';
+import type { Plan } from '@/types/plan';
+import { localDateKey } from '@/utils/dates';
 
 export type IntegrationId = 'contacts' | 'calendar' | 'microphone' | 'notifications' | 'location' | 'camera';
 
@@ -13,6 +15,40 @@ export async function interpretInstruction(payload: {
 }) {
   const { data } = await api.post('/api/ai/interpret', payload, { timeout: 90000 });
   return data;
+}
+
+/** Plain language -> plan for review (nothing is saved). The server allows Gemini ~45s. */
+export async function requestPlan(payload: {
+  message: string;
+  answers?: { question: string; answer: string }[];
+  keepTasks?: unknown[];
+}) {
+  const now = new Date();
+  const { data } = await api.post('/api/ai/plan', {
+    ...payload,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    today: localDateKey(now),
+    localTime: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+  }, { timeout: 60000 });
+  return data as Plan;
+}
+
+/**
+ * Saves the reviewed plan. The plan id doubles as the idempotency key, so a retry
+ * or double tap returns the same tasks instead of creating duplicates.
+ */
+export async function confirmPlan(planId: string, tasks: unknown[]) {
+  const send = () => api.post('/api/ai/plan/confirm', { idempotencyKey: planId, tasks }, { timeout: 30000 });
+  try {
+    const { data } = await send();
+    return data as { created: { id: string; title: string }[]; replayed?: boolean };
+  } catch (error: any) {
+    // Another request with this key is still saving: wait briefly and ask again.
+    if (error?.response?.status !== 409) throw error;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const { data } = await send();
+    return data as { created: { id: string; title: string }[]; replayed?: boolean };
+  }
 }
 
 export async function confirmAiActions(payload: { tasks?: unknown[]; reschedule?: unknown; arrivalReminders?: unknown[] }) {

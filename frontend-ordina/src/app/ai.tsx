@@ -23,11 +23,13 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { confirmAiActions, fetchAiMessages, interpretFromMedia, interpretInstruction, transcribeAudio } from '@/services/ai';
+import { confirmAiActions, confirmPlan, fetchAiMessages, interpretFromMedia, interpretInstruction, requestPlan, transcribeAudio } from '@/services/ai';
 import { MAX_MEDIA_BYTES, matchingContacts, pickTaskMedia, type MediaSource } from '@/services/device-integrations';
 import {
   createGoogleCalendarEvents,
@@ -37,6 +39,10 @@ import {
 import { scheduleTaskReminder } from '@/services/notifications';
 import { useAuthStore } from '@/store/auth-store';
 import { useTasksStore } from '@/store/tasks-store';
+import type { DraftTask, Plan } from '@/types/plan';
+import { localDateKey } from '@/utils/dates';
+import { mergeReplan, toConfirmPayload, toDrafts, toKeepTasks } from '@/utils/plan-draft';
+import { friendlyError } from '@/utils/task-validation';
 
 type VoiceState = 'ready' | 'listening' | 'processing' | 'understanding' | 'confirmation' | 'completed' | 'error';
 
@@ -95,6 +101,12 @@ function errorMessage(error: any, fallback: string) {
   return message || fallback;
 }
 
+/** Server AI errors already carry a friendly message; everything else gets a plain explanation. */
+function aiErrorMessage(error: any, fallback: string) {
+  if (error?.response?.data?.code && error.response.data.message) return String(error.response.data.message);
+  return friendlyError(error, fallback);
+}
+
 /** Reads a local file picked/recorded on the device as base64. */
 async function readBase64(uri: string) {
   return new File(uri).base64();
@@ -127,8 +139,18 @@ export default function OrdinaAiScreen() {
   // A picked photo/video waits here until the user says what to do with it.
   const [attachment, setAttachment] = useState<{ uri: string; mimeType: string; isVideo: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
+  // ORDINA AI plan (typed requests): review before anything is saved.
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [drafts, setDrafts] = useState<DraftTask[]>([]);
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answered, setAnswered] = useState<{ question: string; answer: string }[]>([]);
+  const [planRequest, setPlanRequest] = useState('');
+  const [planning, setPlanning] = useState(false);
+  const [replanning, setReplanning] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [aiError, setAiError] = useState<{ message: string; retry?: () => void } | null>(null);
 
-  const busy = voice === 'understanding' || voice === 'processing' || saving;
+  const busy = voice === 'understanding' || voice === 'processing' || saving || planning || replanning || savingPlan;
 
   useEffect(() => {
     const show = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => {
@@ -161,6 +183,7 @@ export default function OrdinaAiScreen() {
     return getGoogleCalendarBusyEvents(ordinaUserId).catch(() => []);
   }
 
+  /** Typed request: ask ORDINA for a plan. The text stays in the box until a plan arrives. */
   async function send(text: string) {
     const message = text.trim();
     if (!message || busy) return;
@@ -168,6 +191,91 @@ export default function OrdinaAiScreen() {
       await sendWithAttachment(message);
       return;
     }
+    setAiError(null);
+    setAttachOpen(false);
+    setResult(null);
+    setPlanning(true);
+    setVoice('understanding');
+    try {
+      const next = await requestPlan({ message });
+      setPlan(next);
+      setDrafts(toDrafts(next.tasks));
+      setAnswers({});
+      setAnswered([]);
+      setPlanRequest(message);
+      setHistory((rows) => [...rows, { role: 'user', content: message }, { role: 'assistant', content: next.summary }]);
+      setDraft('');
+      setVoice(next.tasks.length || next.questions.length ? 'confirmation' : 'completed');
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+    } catch (error) {
+      setVoice('error');
+      setAiError({ message: aiErrorMessage(error, 'ORDINA AI could not plan that. Please try again.'), retry: () => void send(message) });
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  async function submitAnswers() {
+    if (!plan || busy) return;
+    const newAnswers = plan.questions
+      .map((question) => ({ question: question.question, answer: (answers[question.id] ?? '').trim() }))
+      .filter((item) => item.answer);
+    if (!newAnswers.length) return;
+    const allAnswers = [...answered, ...newAnswers];
+    setAiError(null);
+    setReplanning(true);
+    try {
+      const next = await requestPlan({ message: planRequest, answers: allAnswers, keepTasks: toKeepTasks(drafts) });
+      setPlan(next);
+      setDrafts(mergeReplan(drafts, next.tasks));
+      setAnswers({});
+      setAnswered(allAnswers);
+      setHistory((rows) => [...rows, { role: 'user', content: newAnswers.map((item) => item.answer).join(' · ') }, { role: 'assistant', content: next.summary }]);
+    } catch (error) {
+      setAiError({ message: aiErrorMessage(error, 'ORDINA AI could not update the plan. Please try again.'), retry: () => void submitAnswers() });
+    } finally {
+      setReplanning(false);
+    }
+  }
+
+  async function addPlanToTasks() {
+    if (!plan || savingPlan || !drafts.length) return;
+    setAiError(null);
+    setSavingPlan(true);
+    try {
+      const saved = await confirmPlan(plan.planId, toConfirmPayload(drafts));
+      await loadTasks();
+      const count = saved.created.length;
+      toast.success(`Added ${count} task${count === 1 ? '' : 's'} to your plan`);
+      setHistory((rows) => [...rows, { role: 'assistant', content: `Added ${count} task${count === 1 ? '' : 's'} to your plan.` }]);
+      setPlan(null);
+      setDrafts([]);
+      setVoice('completed');
+      if (count) router.push({ pathname: '/schedule-created', params: { taskIds: saved.created.map((task) => task.id).join(',') } });
+    } catch (error) {
+      setAiError({ message: aiErrorMessage(error, 'Your plan could not be saved. Please try again.'), retry: () => void addPlanToTasks() });
+    } finally {
+      setSavingPlan(false);
+    }
+  }
+
+  function cancelPlan() {
+    setPlan(null);
+    setDrafts([]);
+    setAnswers({});
+    setAnswered([]);
+    setAiError(null);
+    setVoice('ready');
+    setHistory((rows) => [...rows, { role: 'assistant', content: 'Plan discarded. Nothing was saved.' }]);
+  }
+
+  /** Quick prompts and replies to them use ORDINA's existing chat assistant. */
+  async function sendLegacy(text: string) {
+    const message = text.trim();
+    if (!message || busy) return;
+    setPlan(null);
+    setDrafts([]);
+    setAiError(null);
     setVoice('understanding');
     setAttachOpen(false);
     setResult(null);
@@ -181,7 +289,7 @@ export default function OrdinaAiScreen() {
       showResult(await interpretInstruction({ message, timezone: timezone(), contacts, calendarEvents: events }));
     } catch (error: any) {
       setVoice('error');
-      Alert.alert('ORDINA AI', errorMessage(error, 'Unable to reach ORDINA AI.'));
+      setAiError({ message: errorMessage(error, 'Unable to reach ORDINA AI.'), retry: () => void sendLegacy(message) });
     }
   }
 
@@ -199,19 +307,17 @@ export default function OrdinaAiScreen() {
         rescheduled?: { id: string; title: string; dueDate?: string; startTime?: string; reminder?: boolean; contactName?: string }[];
       };
       const followUpErrors: string[] = [];
+      // Reminders are best-effort and run in the background: a pending permission
+      // prompt must never keep the plan stuck on "Saving...".
       for (const task of [...(saved.created ?? []), ...(saved.rescheduled ?? [])]) {
         if (!task.reminder || !task.dueDate) continue;
-        try {
-          const start = new Date(`${task.dueDate}T${task.startTime || '09:00'}:00`);
-          const when = task.startTime ? new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60_000) : start;
-          await scheduleTaskReminder(String(task.id), task.title, when.getTime() > Date.now() ? when : start, {
-            body: task.startTime
-              ? `Starts at ${task.startTime}${task.contactName ? ` · ${task.contactName}` : ''}`
-              : 'Planned for today',
-          });
-        } catch (error) {
-          followUpErrors.push(error instanceof Error ? error.message : 'A task reminder could not be scheduled.');
-        }
+        const start = new Date(`${task.dueDate}T${task.startTime || '09:00'}:00`);
+        const when = task.startTime ? new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60_000) : start;
+        void scheduleTaskReminder(String(task.id), task.title, when.getTime() > Date.now() ? when : start, {
+          body: task.startTime
+            ? `Starts at ${task.startTime}${task.contactName ? ` · ${task.contactName}` : ''}`
+            : 'Planned for today',
+        }).catch(() => undefined);
       }
       // Only new tasks become calendar events; moved tasks would otherwise be duplicated.
       const newTasks = chosen.filter((task) => !task.id);
@@ -268,8 +374,10 @@ export default function OrdinaAiScreen() {
           Alert.alert('Voice', 'I could not hear any words. Please try speaking again.');
           return;
         }
+        // Voice only fills the text box; the user reviews it and sends it like typed text.
+        setDraft((current) => (current.trim() ? `${current.trim()} ${text.trim()}` : text.trim()));
         setVoice('ready');
-        await send(text);
+        setTimeout(() => inputRef.current?.focus(), 100);
         return;
       }
       const permission = await requestRecordingPermissionsAsync();
@@ -374,10 +482,10 @@ export default function OrdinaAiScreen() {
           onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}>
           {history.length === 0 ? (
             <View style={[styles.welcome, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              <ThemedText style={styles.proposalTitle}>What do you need to get done?</ThemedText>
+              <ThemedText style={styles.proposalTitle}>Tell ORDINA what you need to get done today.</ThemedText>
               <ThemedText themeColor="textSecondary">
-                Type, speak, snap a photo of a list, or record a short video. ORDINA turns it into a schedule you
-                review before anything is saved.
+                Describe your day in your own words, for example “Study Python for two hours tomorrow morning and call
+                my mentor at 6 PM”. ORDINA builds a plan you can edit before anything is saved.
               </ThemedText>
             </View>
           ) : null}
@@ -398,7 +506,7 @@ export default function OrdinaAiScreen() {
               {result.suggestedReplies.map((reply: string) => (
                 <Pressable
                   key={reply}
-                  onPress={() => void send(reply)}
+                  onPress={() => void (attachment ? send(reply) : sendLegacy(reply))}
                   style={({ pressed }) => [
                     styles.reply,
                     { borderColor: theme.primary, backgroundColor: theme.backgroundSelected, opacity: pressed ? 0.7 : 1 },
@@ -412,8 +520,28 @@ export default function OrdinaAiScreen() {
           {busy ? (
             <View style={[styles.aiBubble, styles.typing, { backgroundColor: theme.card }]}>
               <ActivityIndicator size="small" color={theme.primary} />
-              <ThemedText themeColor="textSecondary">ORDINA is thinking…</ThemedText>
+              <ThemedText themeColor="textSecondary">
+                {planning ? 'ORDINA is planning your day…' : replanning ? 'Updating your plan…' : savingPlan ? 'Adding tasks…' : 'ORDINA is thinking…'}
+              </ThemedText>
             </View>
+          ) : null}
+
+          {plan ? (
+            <PlanReview
+              summary={plan.summary}
+              tasks={drafts}
+              questions={plan.questions}
+              assumptions={plan.assumptions}
+              answers={answers}
+              today={plan.today || localDateKey()}
+              saving={savingPlan}
+              replanning={replanning}
+              onChangeTasks={setDrafts}
+              onAnswer={(id, text) => setAnswers((current) => ({ ...current, [id]: text }))}
+              onSubmitAnswers={() => void submitAnswers()}
+              onConfirm={() => void addPlanToTasks()}
+              onCancel={cancelPlan}
+            />
           ) : null}
 
           {result?.plan ? (
@@ -542,13 +670,28 @@ export default function OrdinaAiScreen() {
           ) : null}
         </ScrollView>
 
+        {aiError ? (
+          <View accessibilityRole="alert" style={[styles.errorBar, { borderColor: theme.danger, backgroundColor: theme.card }]}>
+            <Ionicons name="alert-circle" size={18} color={theme.danger} />
+            <ThemedText style={styles.errorText}>{aiError.message}</ThemedText>
+            {aiError.retry ? (
+              <Pressable accessibilityRole="button" disabled={busy} onPress={aiError.retry} style={styles.errorAction}>
+                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Try again</ThemedText>
+              </Pressable>
+            ) : null}
+            <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => setAiError(null)} style={styles.errorAction}>
+              <Ionicons name="close" size={18} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+        ) : null}
+
         {keyboardOpen || attachment ? null : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickRow} contentContainerStyle={styles.quick}>
           {QUICK_PROMPTS.map((label) => (
             <Pressable
               key={label}
               disabled={busy}
-              onPress={() => void send(label)}
+              onPress={() => void sendLegacy(label)}
               style={[styles.chip, { borderColor: theme.border, backgroundColor: theme.card }]}>
               <ThemedText style={styles.chipText}>{label}</ThemedText>
             </Pressable>
@@ -614,20 +757,25 @@ export default function OrdinaAiScreen() {
               ? 'Listening… tap stop when done'
               : attachment
                 ? 'e.g. “Create tasks from this list”'
-                : 'Tell ORDINA what you need…'}
+                : 'Tell ORDINA what you need to get done today.'}
             placeholderTextColor={theme.textSecondary}
             multiline
             textAlignVertical="top"
             onFocus={() => setAttachOpen(false)}
+            editable={!planning}
+            accessibilityLabel="Tell ORDINA what you need to get done today"
+            maxLength={2000}
             style={[styles.input, { color: theme.text }]}
           />
-          <Pressable
-            accessibilityLabel={voice === 'listening' ? 'Stop recording' : 'Speak'}
-            disabled={busy && voice !== 'listening'}
-            onPress={() => void toggleVoice()}
-            style={[styles.mic, { backgroundColor: voice === 'listening' ? theme.danger : theme.secondary }]}>
-            <Ionicons name={voice === 'listening' ? 'stop' : 'mic'} size={18} color="#FFFFFF" />
-          </Pressable>
+          {Platform.OS === 'web' ? null : (
+            <Pressable
+              accessibilityLabel={voice === 'listening' ? 'Stop recording' : 'Speak your request'}
+              disabled={busy && voice !== 'listening'}
+              onPress={() => void toggleVoice()}
+              style={[styles.mic, { backgroundColor: voice === 'listening' ? theme.danger : theme.secondary }]}>
+              <Ionicons name={voice === 'listening' ? 'stop' : 'mic'} size={18} color="#FFFFFF" />
+            </Pressable>
+          )}
           <Pressable
             accessibilityLabel="Send"
             disabled={busy || !draft.trim()}
@@ -712,5 +860,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   input: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 15, paddingVertical: 10, paddingHorizontal: 6, minHeight: 40, maxHeight: 120 },
-  mic: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  mic: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  errorBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderRadius: 14, paddingLeft: 12 },
+  errorText: { flex: 1, fontSize: 13, paddingVertical: 10 },
+  errorAction: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
 });

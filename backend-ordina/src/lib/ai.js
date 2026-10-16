@@ -1,3 +1,4 @@
+const { geminiText } = require('./gemini');
 const { detectConflicts, findOpenSlot, recommendNow, overwhelmPlan, planDay, durationMinutes, toDateKey, addDays } = require('./schedule');
 
 const SYSTEM_PROMPT = `You are ORDINA, an action-oriented personal productivity assistant.
@@ -37,112 +38,6 @@ Conversation rules (be a helpful, interactive assistant, not a form):
 function parseJsonText(text) {
   const trimmed = String(text || '{}').replace(/```json|```/g, '').trim();
   return JSON.parse(trimmed);
-}
-
-const DEFAULT_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-flash-lite-latest',
-  'gemini-3.5-flash',
-  'gemini-flash-latest',
-  'gemini-3.1-flash-lite',
-];
-const BUSY_COOLDOWN_MS = 60_000;
-const ATTEMPT_TIMEOUT_MS = 30_000;
-// Model health shared across requests: skip models that just reported overload, start with the last one that worked.
-const busyUntil = new Map();
-let lastWorkingModel = null;
-const RETRYABLE = new Set([429, 500, 502, 503, 504]);
-
-function geminiModels() {
-  const configured = [process.env.GEMINI_MODEL, ...(process.env.GEMINI_FALLBACK_MODELS || '').split(',')]
-    .map((model) => String(model || '').trim())
-    .filter(Boolean);
-  const all = [...new Set([...configured, ...DEFAULT_MODELS])];
-  const ordered = lastWorkingModel && all.includes(lastWorkingModel)
-    ? [lastWorkingModel, ...all.filter((model) => model !== lastWorkingModel)]
-    : all;
-  const now = Date.now();
-  const ready = ordered.filter((model) => (busyUntil.get(model) || 0) <= now);
-  // If everything is cooling down, still try them all rather than failing outright.
-  return ready.length ? [...ready, ...ordered.filter((model) => !ready.includes(model))] : ordered;
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Calls Gemini generateContent, retrying busy models and falling back through
- * GEMINI_MODEL, GEMINI_FALLBACK_MODELS and sensible defaults. Returns the response text.
- */
-async function geminiText(contents, generationConfig = {}) {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) {
-    const error = new Error('ORDINA AI is not configured. Set GEMINI_API_KEY in backend-ordina/.env');
-    error.status = 503;
-    throw error;
-  }
-  let lastStatus = 0;
-  let lastMessage = '';
-  for (const model of geminiModels()) {
-    // Busy (503) models are skipped immediately; rate limits (429) get one short retry.
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      let response;
-      try {
-        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-          body: JSON.stringify({ contents, generationConfig }),
-          signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
-        });
-      } catch (error) {
-        // Timed out or network failure: treat the model as busy and move on.
-        lastStatus = 504;
-        lastMessage = error.message;
-        busyUntil.set(model, Date.now() + BUSY_COOLDOWN_MS);
-        break;
-      }
-      if (response.ok) {
-        const payload = await response.json();
-        lastWorkingModel = model;
-        busyUntil.delete(model);
-        return payload.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('') || '';
-      }
-      lastStatus = response.status;
-      lastMessage = await response.text().catch(() => '');
-      if (response.status === 503 || response.status === 429) {
-        busyUntil.set(model, Date.now() + BUSY_COOLDOWN_MS);
-      }
-      // Retired / not offered to this key / quota exhausted on this model: try the next one.
-      if (response.status === 404 || (response.status === 429 && /quota/i.test(lastMessage))) {
-        busyUntil.set(model, Date.now() + 10 * BUSY_COOLDOWN_MS);
-        break;
-      }
-      if (response.status === 401 || response.status === 403) {
-        console.error(`ORDINA Gemini ${model} auth failed`, response.status, lastMessage.slice(0, 300));
-        const error = new Error('ORDINA AI key was rejected. Check GEMINI_API_KEY in backend-ordina/.env.');
-        error.status = 502;
-        throw error;
-      }
-      if (!RETRYABLE.has(response.status)) {
-        // e.g. 400 "input modality not enabled" on this model: another model may accept it.
-        console.error(`ORDINA Gemini ${model} refused`, response.status, lastMessage.slice(0, 200));
-        break;
-      }
-      if (response.status !== 429) break;
-      await sleep(800);
-    }
-  }
-  console.error('ORDINA Gemini unavailable', lastStatus, lastMessage.slice(0, 300));
-  if (lastStatus === 400) {
-    const error = new Error('ORDINA AI could not read that file. Try a clearer photo or a shorter video.');
-    error.status = 400;
-    throw error;
-  }
-  const error = new Error('ORDINA AI is very busy right now. Please try again in a moment.');
-  error.status = 503;
-  throw error;
 }
 
 async function callGemini(contents, responseMimeType = 'application/json') {
