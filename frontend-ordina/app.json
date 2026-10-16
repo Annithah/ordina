@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ORDINA",
+    "name": "ORDINA AI",
     "slug": "ordina",
     "version": "1.0.0",
     "platforms": [
@@ -38,7 +38,6 @@
         "foregroundImage": "./assets/images/ordina-adaptive-icon.png"
       },
       "predictiveBackGestureEnabled": false,
-      "versionCode": 1,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -115,7 +114,9 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "ORDINA uses the microphone so you can speak tasks instead of typing them."
+          "microphonePermission": "ORDINA uses the microphone so you can speak tasks instead of typing them.",
+          "enableBackgroundPlayback": false,
+          "enableBackgroundRecording": false
         }
       ],
       "@react-native-community/datetimepicker"

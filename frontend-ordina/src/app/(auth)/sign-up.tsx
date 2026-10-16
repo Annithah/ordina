@@ -12,6 +12,7 @@ import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuthStore } from '@/store/auth-store';
 import { routeAfterAuth } from '@/utils/after-auth';
+import { FEATURES } from '@/config/release';
 
 export default function SignUpScreen() {
   const theme = useTheme();
@@ -79,15 +80,18 @@ export default function SignUpScreen() {
 
           <PrimaryButton label="Create Account" onPress={() => void onCreate()} />
 
-          <View style={styles.dividerRow}>
-            <View style={[styles.line, { backgroundColor: theme.border }]} />
-            <ThemedText themeColor="textSecondary" style={styles.or}>
-              or sign up with
-            </ThemedText>
-            <View style={[styles.line, { backgroundColor: theme.border }]} />
-          </View>
-
-          <SocialAuthButtons />
+          {FEATURES.socialSignIn ? (
+            <>
+              <View style={styles.dividerRow}>
+                <View style={[styles.line, { backgroundColor: theme.border }]} />
+                <ThemedText themeColor="textSecondary" style={styles.or}>
+                  or sign up with
+                </ThemedText>
+                <View style={[styles.line, { backgroundColor: theme.border }]} />
+              </View>
+              <SocialAuthButtons />
+            </>
+          ) : null}
 
           <View style={styles.footer}>
             <ThemedText themeColor="textSecondary">Already have an account? </ThemedText>

@@ -45,7 +45,7 @@ export default function SearchScreen() {
   const projectLabel = projectId === 'All' ? 'All' : projects.find((project) => project.id === projectId)?.name || 'All';
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={[styles.search, { borderColor: theme.primary, backgroundColor: theme.card }]}>
         <Ionicons name="search" size={18} color={theme.primary} />
         <TextInput

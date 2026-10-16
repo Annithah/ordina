@@ -14,6 +14,9 @@ function devLanApiUrl(): string | null {
 
 function resolveApiBaseUrl(): string {
   const configuredUrl = process.env.EXPO_PUBLIC_API_URL;
+  // Release builds (Google Play) only ever talk to the HTTPS production backend, never a
+  // laptop or LAN address. The value comes from eas.json and app.config.js checks it.
+  if (!__DEV__) return configuredUrl && /^https:\/\//i.test(configuredUrl) ? configuredUrl : '';
   if (configuredUrl && LOCAL_URL.test(configuredUrl)) return devLanApiUrl() ?? configuredUrl;
   if (configuredUrl) return configuredUrl;
 

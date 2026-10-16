@@ -44,6 +44,7 @@ import type { DraftTask, Plan } from '@/types/plan';
 import { localDateKey } from '@/utils/dates';
 import { mergeReplan, toConfirmPayload, toDrafts, toKeepTasks } from '@/utils/plan-draft';
 import { friendlyError } from '@/utils/task-validation';
+import { FEATURES } from '@/config/release';
 
 type VoiceState = 'ready' | 'listening' | 'processing' | 'understanding' | 'confirmation' | 'completed' | 'error';
 
@@ -180,7 +181,7 @@ export default function OrdinaAiScreen() {
   }
 
   async function calendarEvents() {
-    if (!ordinaUserId) return [];
+    if (!ordinaUserId || !FEATURES.googleCalendar) return [];
     return getGoogleCalendarBusyEvents(ordinaUserId).catch(() => []);
   }
 
@@ -284,7 +285,7 @@ export default function OrdinaAiScreen() {
     setDraft('');
     try {
       const [contacts, events] = await Promise.all([
-        matchingContacts(message).catch(() => []),
+        FEATURES.contacts ? matchingContacts(message).catch(() => []) : Promise.resolve([]),
         calendarEvents(),
       ]);
       showResult(await interpretInstruction({ message, timezone: timezone(), contacts, calendarEvents: events }));
@@ -311,7 +312,7 @@ export default function OrdinaAiScreen() {
       // Reminders are best-effort and run in the background: a pending permission
       // prompt must never keep the plan stuck on "Saving...".
       for (const task of [...(saved.created ?? []), ...(saved.rescheduled ?? [])]) {
-        if (!task.reminder || !task.dueDate) continue;
+        if (!FEATURES.reminders || !task.reminder || !task.dueDate) continue;
         const start = new Date(`${task.dueDate}T${task.startTime || '09:00'}:00`);
         const when = task.startTime ? new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60_000) : start;
         void scheduleTaskReminder(String(task.id), task.title, when.getTime() > Date.now() ? when : start, {
@@ -322,7 +323,7 @@ export default function OrdinaAiScreen() {
       }
       // Only new tasks become calendar events; moved tasks would otherwise be duplicated.
       const newTasks = chosen.filter((task) => !task.id);
-      if (newTasks.length && ordinaUserId && await getGoogleCalendarConnection(ordinaUserId).catch(() => null)) {
+      if (FEATURES.googleCalendar && newTasks.length && ordinaUserId && await getGoogleCalendarConnection(ordinaUserId).catch(() => null)) {
         try {
           await createGoogleCalendarEvents(newTasks, ordinaUserId);
         } catch (error) {
@@ -743,13 +744,15 @@ export default function OrdinaAiScreen() {
             styles.composer,
             { backgroundColor: theme.card, borderColor: theme.border, marginBottom: keyboardOpen ? 8 : 16 },
           ]}>
-          <Pressable
-            accessibilityLabel="Attach photo or video"
-            disabled={busy || Platform.OS === 'web'}
-            onPress={() => setAttachOpen((open) => !open)}
-            style={[styles.mic, { backgroundColor: theme.backgroundElement }]}>
-            <Ionicons name={attachOpen ? 'close' : 'add'} size={20} color={theme.text} />
-          </Pressable>
+          {FEATURES.mediaToTasks && Platform.OS !== 'web' ? (
+            <Pressable
+              accessibilityLabel="Attach photo or video"
+              disabled={busy}
+              onPress={() => setAttachOpen((open) => !open)}
+              style={[styles.mic, { backgroundColor: theme.backgroundElement }]}>
+              <Ionicons name={attachOpen ? 'close' : 'add'} size={20} color={theme.text} />
+            </Pressable>
+          ) : null}
           <TextInput
             ref={inputRef}
             value={draft}

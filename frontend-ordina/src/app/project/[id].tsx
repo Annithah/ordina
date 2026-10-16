@@ -51,7 +51,7 @@ export default function ProjectDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.nav}>
         <Pressable onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color={theme.text} />

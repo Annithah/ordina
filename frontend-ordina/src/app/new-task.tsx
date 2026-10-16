@@ -40,6 +40,7 @@ import {
   timeFromMinutes,
 } from '@/utils/task-planning';
 import { DESCRIPTION_MAX, TITLE_MAX, friendlyError, validateTaskForm, type TaskFieldErrors } from '@/utils/task-validation';
+import { FEATURES } from '@/config/release';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -340,7 +341,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     if (savedTaskId) {
       // The task is saved. Local notifications are best-effort and must never hold up saving.
       const id = savedTaskId;
-      const reminder = reminderLead !== null
+      const reminder = FEATURES.reminders && reminderLead !== null
         ? (() => {
           const start = dateFromKey(dueDate, startTime || '09:00');
           const when = new Date(start.getTime() - reminderLead * 60_000);
@@ -566,13 +567,13 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             </View>
           </Section>
 
-          <Section icon="notifications-outline" title="Reminder">
+          {FEATURES.reminders ? <Section icon="notifications-outline" title="Reminder">
             <View style={styles.wrap}>
               {REMINDERS.map((item) => (
                 <Chip key={item.label} label={item.label} active={reminderLead === item.minutes} onPress={() => setReminderLead(item.minutes)} />
               ))}
             </View>
-          </Section>
+          </Section> : null}
 
           <Section icon="repeat-outline" title="Repeat">
             <View style={styles.wrap}>
@@ -582,7 +583,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             </View>
           </Section>
 
-          <Section icon="people-outline" title="With someone">
+          {FEATURES.contacts ? <Section icon="people-outline" title="With someone">
             {contact ? (
               <View style={styles.contactRow}>
                 <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]}>
@@ -605,7 +606,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
                 <ThemedText style={styles.slotText}>Link a contact for quick call & message</ThemedText>
               </Pressable>
             )}
-          </Section>
+          </Section> : null}
         </ScrollView>
 
         <View style={[styles.footer, { backgroundColor: theme.background, borderTopColor: theme.border }]}>
