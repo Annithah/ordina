@@ -12,6 +12,9 @@ const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = requi
 const ai = require('./lib/ai');
 const schedule = require('./lib/schedule');
 const taskValidation = require('./lib/task-validation');
+const gemini = require('./lib/gemini');
+const planner = require('./lib/planner');
+const planService = require('./lib/plan-service');
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -238,6 +241,9 @@ app.delete('/api/auth/account', async (req, res) => {
     // Delete explicitly so removal does not depend on SQLite foreign-key enforcement.
     await prisma.$transaction([
       prisma.taskCategory.deleteMany({ where: { task: { userId } } }),
+      prisma.taskDeadline.deleteMany({ where: { task: { userId } } }),
+      prisma.planningProfile.deleteMany({ where: { userId } }),
+      prisma.aiPlanConfirmation.deleteMany({ where: { userId } }),
       prisma.reminder.deleteMany({ where: { userId } }),
       prisma.notification.deleteMany({ where: { userId } }),
       prisma.aiMessage.deleteMany({ where: { userId } }),
@@ -525,6 +531,7 @@ function mapTask(task) {
     reminder: Boolean(task.reminderEnabled),
     contactName: task.contactName || undefined,
     contactPhone: task.contactPhone || undefined,
+    deadline: task.deadline?.deadline || undefined,
     completed: task.status === 'completed',
     createdAt: task.createdAt.toISOString(),
     updatedAt: task.updatedAt.toISOString(),
@@ -594,7 +601,7 @@ async function ownedTasks(userId) {
   const rows = await prisma.task.findMany({
     where: { userId },
     orderBy: { dueAt: 'asc' },
-    include: { categories: { include: { category: true } } },
+    include: TASK_INCLUDE,
   });
   return rows
     .filter((task) => task.recurrence === 'none' || task.parentTaskId)
@@ -671,7 +678,17 @@ function taskPayload(body, userId, existing = {}) {
   };
 }
 
-const TASK_INCLUDE = { categories: { include: { category: true } } };
+const TASK_INCLUDE = { categories: { include: { category: true } }, deadline: true };
+
+/** Sets or clears a task's deadline ("YYYY-MM-DD" or "YYYY-MM-DDTHH:MM"). */
+async function setTaskDeadline(taskId, deadline) {
+  if (deadline === undefined) return;
+  if (!deadline) {
+    await prisma.taskDeadline.deleteMany({ where: { taskId } });
+    return;
+  }
+  await prisma.taskDeadline.upsert({ where: { taskId }, update: { deadline }, create: { taskId, deadline } });
+}
 
 /** Stores the task's single category through the existing categories / task_categories tables. */
 async function setTaskCategory(userId, taskId, category) {
@@ -897,6 +914,102 @@ app.get('/api/ai/messages', async (req, res) => {
   res.json({ messages });
 });
 
+const AI_FRIENDLY = {
+  AI_NOT_CONFIGURED: 'ORDINA AI is not available right now. You can still add tasks yourself.',
+  AI_KEY_REJECTED: 'ORDINA AI is not available right now. You can still add tasks yourself.',
+  AI_QUOTA: 'ORDINA AI has reached its usage limit for now. Please try again later.',
+  AI_BUSY: 'ORDINA AI is very busy right now. Please try again in a moment.',
+  AI_TIMEOUT: 'ORDINA AI took too long to answer. Please try again.',
+  AI_SAFETY: 'ORDINA AI can’t help with that request. Try describing your tasks differently.',
+  AI_EMPTY: 'ORDINA AI sent back an answer we couldn’t use. Please try again.',
+  AI_INVALID: 'ORDINA AI sent back an answer we couldn’t use. Please try again.',
+  AI_BAD_REQUEST: 'ORDINA AI couldn’t read that request. Try rephrasing it.',
+};
+
+function cleanAnswers(answers) {
+  return (Array.isArray(answers) ? answers : [])
+    .slice(0, 5)
+    .map((item) => ({ question: String(item?.question || '').trim().slice(0, 300), answer: String(item?.answer || '').trim().slice(0, 300) }))
+    .filter((item) => item.question && item.answer);
+}
+
+function validTimezone(value) {
+  const zone = String(value || '').slice(0, 64);
+  if (!zone) return null;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return null;
+  }
+}
+
+/** Plain language -> structured plan for review. Nothing is saved until /api/ai/plan/confirm. */
+app.post('/api/ai/plan', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  const message = String(req.body?.message || '').trim();
+  if (!message) return res.status(400).json({ message: 'Tell ORDINA what you need to get done.' });
+  if (message.length > 2000) return res.status(400).json({ message: 'That is a bit long. Please keep it under 2,000 characters.' });
+  if (!gemini.isConfigured()) {
+    return res.status(503).json({ message: AI_FRIENDLY.AI_NOT_CONFIGURED, code: 'AI_NOT_CONFIGURED' });
+  }
+  const timezone = validTimezone(req.body?.timezone);
+  try {
+    if (timezone) {
+      await prisma.user.updateMany({ where: { id: userId, NOT: { timezone } }, data: { timezone } }).catch(() => undefined);
+    }
+    await materializeRecurrence(userId);
+    const [existingTasks, profile] = await Promise.all([
+      ownedTasks(userId),
+      planService.refreshProfile(prisma, userId),
+    ]);
+    const plan = await planner.createPlan({
+      message,
+      answers: cleanAnswers(req.body?.answers),
+      keepTasks: req.body?.keepTasks,
+      timezone: timezone || undefined,
+      clientToday: req.body?.today,
+      clientTime: req.body?.localTime,
+      existingTasks,
+      profile,
+    });
+    await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
+    await prisma.aiMessage.create({
+      data: { userId, role: 'assistant', content: plan.summary, actions: JSON.stringify({ intent: 'plan', planId: plan.planId }) },
+    });
+    const { repaired, ...body } = plan;
+    return res.json(body);
+  } catch (error) {
+    const code = error.code && AI_FRIENDLY[error.code] ? error.code : 'AI_ERROR';
+    // Log the failure type only, never the user's request or tasks.
+    console.error('AI plan failed:', code, error.status || 500);
+    return res.status(code === 'AI_ERROR' ? 500 : error.status || 502).json({
+      message: AI_FRIENDLY[code] || 'Something went wrong while planning. Please try again.',
+      code,
+    });
+  }
+});
+
+/** Saves the reviewed plan into the normal task list, exactly once per idempotency key. */
+app.post('/api/ai/plan/confirm', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    const result = await planService.confirmPlan(prisma, userId, {
+      idempotencyKey: req.body?.idempotencyKey,
+      tasks: req.body?.tasks,
+    }, { taskPayload, setTaskCategory, setTaskDeadline, mapTask, include: TASK_INCLUDE });
+    return res.status(result.replayed ? 200 : 201).json(result);
+  } catch (error) {
+    if (error.status && error.status < 500) {
+      return res.status(error.status).json({ message: error.message, code: error.code, errors: error.errors });
+    }
+    console.error('AI plan confirm failed:', error.message);
+    return res.status(500).json({ message: 'Your plan could not be saved. Please try again.' });
+  }
+});
+
 app.post('/api/ai/schedule', async (req, res) => {
   req.body = { ...req.body, message: req.body?.prompt || req.body?.message };
   const userId = requireUser(req, res);
@@ -929,6 +1042,7 @@ app.post('/api/tasks', async (req, res) => {
     const data = taskPayload({ ...req.body, ...value }, userId);
     const created = await prisma.task.create({ data });
     await setTaskCategory(userId, created.id, value.category);
+    await setTaskDeadline(created.id, value.deadline);
     if (data.reminderEnabled && data.dueAt) {
       await prisma.reminder.create({
         data: { userId, taskId: created.id, title: `Reminder: ${created.title}`, remindAt: data.dueAt, enabled: true, status: 'scheduled' },
@@ -952,6 +1066,7 @@ app.patch('/api/tasks/:id', async (req, res) => {
     if (!existing) return res.status(404).json({ message: 'Task not found.' });
     await prisma.task.update({ where: { id: existing.id }, data: taskPayload({ ...req.body, ...value }, userId, existing) });
     await setTaskCategory(userId, existing.id, value.category);
+    await setTaskDeadline(existing.id, value.deadline);
     const task = await prisma.task.findUnique({ where: { id: existing.id }, include: TASK_INCLUDE });
     res.json({ task: mapTask(task) });
   } catch (error) {
@@ -1081,6 +1196,12 @@ async function start() {
     console.error('ORDINA db: failed to connect', error);
     process.exitCode = 1;
     return;
+  }
+
+  if (!gemini.isConfigured()) {
+    console.warn('ORDINA AI: GEMINI_API_KEY is not set. AI planning will answer "not available" until it is configured in backend-ordina/.env.');
+  } else {
+    console.log(`ORDINA AI: Gemini model ${gemini.configuredModel()}`);
   }
 
   app.listen(port, '0.0.0.0', () => {

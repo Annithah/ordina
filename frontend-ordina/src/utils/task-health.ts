@@ -23,8 +23,17 @@ function endMinutes(task: Task) {
   return h * 60 + m + length;
 }
 
+function deadlinePassed(task: Task, now: Date) {
+  if (!task.deadline) return false;
+  const [date, time] = task.deadline.split('T');
+  const [y, m, d] = date.split('-').map(Number);
+  const [h, min] = (time ?? '23:59').split(':').map(Number);
+  return new Date(y, m - 1, d, h, min).getTime() < now.getTime();
+}
+
 export function taskHealth(task: Task, now = new Date()): TaskHealth {
   if (task.completed) return 'completed';
+  if (deadlinePassed(task, now)) return 'overdue';
   const today = localDateKey(now);
   if (task.dueDate && task.dueDate < today) return 'overdue';
   if (task.dueDate === today) {

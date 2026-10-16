@@ -204,6 +204,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<TaskFieldErrors>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<string | null>(taskToEdit?.deadline ?? null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -320,6 +321,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
       contactName: contact?.name ?? '',
       contactPhone: contact?.phone ?? '',
       completed: taskToEdit?.completed ?? false,
+      ...(taskToEdit?.deadline && !deadline ? { deadline: null } : {}),
     } as Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
 
     setSaving(true);
@@ -506,6 +508,19 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             </Pressable>
           </Section>
 
+          {deadline ? (
+            <View style={[styles.warning, { borderColor: theme.danger }]}>
+              <Ionicons name="flag-outline" size={16} color={theme.danger} />
+              <ThemedText style={styles.warningText}>
+                Deadline: {friendlyDay(deadline.split('T')[0])}
+                {deadline.includes('T') ? `, before ${formatTime12(deadline.split('T')[1])}` : ''}
+              </ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel="Remove deadline" onPress={() => setDeadline(null)} style={styles.removeDeadline}>
+                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Remove</ThemedText>
+              </Pressable>
+            </View>
+          ) : null}
+
           <Section icon="hourglass-outline" title="Duration" right={<ThemedText themeColor="textSecondary" style={styles.sectionValue}>{formatDuration(minutes)}</ThemedText>}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
               {DURATIONS.map((value) => (
@@ -678,6 +693,7 @@ const styles = StyleSheet.create({
   loadFill: { height: 6, borderRadius: 3 },
   warning: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10 },
   warningText: { flex: 1, fontSize: 12 },
+  removeDeadline: { minHeight: 44, paddingHorizontal: 8, justifyContent: 'center' },
   slotBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingVertical: 10 },
   slotText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   helper: { fontSize: 12 },

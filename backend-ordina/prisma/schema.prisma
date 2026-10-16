@@ -25,6 +25,8 @@ model User {
   aiMessages    AiMessage[]
   passwordResets PasswordReset[]
   places        Place[]
+  planningProfile  PlanningProfile?
+  planConfirmations AiPlanConfirmation[]
 
   @@map("users")
 }
@@ -58,6 +60,7 @@ model Task {
   occurrences     Task[]         @relation("TaskOccurrences")
   categories      TaskCategory[]
   reminders       Reminder[]
+  deadline        TaskDeadline?
 
   @@index([userId])
   @@index([userId, status])
@@ -226,4 +229,36 @@ enum TaskStatus {
   in_progress
   completed
   archived
+}
+
+/// Learned planning habits for ORDINA AI (JSON). Deleted with the user.
+model PlanningProfile {
+  userId    Int      @id @map("user_id")
+  data      String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("planning_profiles")
+}
+
+/// One row per confirmed AI plan, so a repeated confirm returns the same tasks instead of duplicating them.
+model AiPlanConfirmation {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  idempotencyKey String   @map("idempotency_key")
+  response       String?
+  createdAt      DateTime @default(now()) @map("created_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, idempotencyKey])
+  @@map("ai_plan_confirmations")
+}
+
+/// Optional deadline for a task: "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM".
+model TaskDeadline {
+  taskId   Int    @id @map("task_id")
+  deadline String
+  task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@map("task_deadlines")
 }

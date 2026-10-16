@@ -54,6 +54,35 @@ async function ensureSchema(prisma) {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+  // Same idempotent statements as migration 20261015120000_ai_planning.
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS planning_profiles (
+      user_id INTEGER NOT NULL PRIMARY KEY,
+      data TEXT NOT NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS ai_plan_confirmations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      response TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+  await prisma.$executeRawUnsafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS ai_plan_confirmations_user_id_idempotency_key_key ON ai_plan_confirmations(user_id, idempotency_key)',
+  );
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS task_deadlines (
+      task_id INTEGER NOT NULL PRIMARY KEY,
+      deadline TEXT NOT NULL,
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `);
 }
 
 module.exports = { ensureSchema };

@@ -28,6 +28,8 @@ export interface Task {
   parentTaskId?: string;
   contactName?: string;
   contactPhone?: string;
+  /** "YYYY-MM-DD" or "YYYY-MM-DDTHH:MM", set when the user gave a deadline. */
+  deadline?: string | null;
   completed: boolean;
   createdAt: string;
   updatedAt: string;
@@ -72,6 +74,7 @@ function normalizeTask(task: any): Task {
     parentTaskId: task.parentTaskId ? String(task.parentTaskId) : undefined,
     contactName: task.contactName ?? undefined,
     contactPhone: task.contactPhone ?? undefined,
+    deadline: task.deadline ?? undefined,
     completed: Boolean(task.completed),
     createdAt: task.createdAt ?? new Date().toISOString(),
     updatedAt: task.updatedAt ?? new Date().toISOString(),
