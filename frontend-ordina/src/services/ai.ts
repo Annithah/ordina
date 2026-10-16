@@ -1,4 +1,4 @@
-import { api } from '@/services/api';
+import { api, COLD_START_MS } from '@/services/api';
 import type { CalendarBusyEvent } from '@/services/google-calendar';
 import type { Plan } from '@/types/plan';
 import { localDateKey } from '@/utils/dates';
@@ -29,7 +29,7 @@ export async function requestPlan(payload: {
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     today: localDateKey(now),
     localTime: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
-  }, { timeout: 60000 });
+  }, { timeout: 60_000 + COLD_START_MS });
   return data as Plan;
 }
 
@@ -38,7 +38,7 @@ export async function requestPlan(payload: {
  * or double tap returns the same tasks instead of creating duplicates.
  */
 export async function confirmPlan(planId: string, tasks: unknown[]) {
-  const send = () => api.post('/api/ai/plan/confirm', { idempotencyKey: planId, tasks }, { timeout: 30000 });
+  const send = () => api.post('/api/ai/plan/confirm', { idempotencyKey: planId, tasks }, { timeout: 30_000 + COLD_START_MS });
   try {
     const { data } = await send();
     return data as { created: { id: string; title: string }[]; replayed?: boolean };

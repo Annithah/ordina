@@ -1,24 +1,33 @@
-// Duplicate prevention for AI plan confirmation, against a real temporary SQLite database.
+// Duplicate prevention for AI plan confirmation, against a real PostgreSQL test database.
+// Set TEST_DATABASE_URL to a throwaway database (it is reset on every run), e.g. the
+// `ordina_test` database of `prisma dev`. Without it these tests are skipped.
+require('dotenv/config');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const dbFile = path.join(os.tmpdir(), `ordina-plan-test-${process.pid}.sqlite`);
-process.env.DATABASE_URL = `file:${dbFile.replace(/\\/g, '/')}`;
+const testUrl = process.env.TEST_DATABASE_URL;
+const skip = testUrl ? false : 'TEST_DATABASE_URL is not set';
+// Each run gets its own throwaway schema inside the test database; it is dropped afterwards.
+const schema = `plan_test_${process.pid}`;
+let prisma;
+let confirmPlan;
 
-const backendRoot = path.resolve(__dirname, '..');
-execFileSync(process.execPath, [path.join(backendRoot, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy'], {
-  cwd: backendRoot,
-  env: { ...process.env },
-  stdio: 'ignore',
-});
-
-const prisma = require('../src/lib/prisma');
-const { ensureSchema } = require('../src/lib/ensure-schema');
-const { confirmPlan } = require('../src/lib/plan-service');
+if (testUrl) {
+  const url = new URL(testUrl);
+  url.searchParams.set('schema', schema);
+  const backendRoot = path.resolve(__dirname, '..');
+  execFileSync(process.execPath, [path.join(backendRoot, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy'], {
+    cwd: backendRoot,
+    env: { ...process.env, DATABASE_URL: url.toString() },
+    stdio: 'ignore',
+  });
+  const { PrismaClient } = require('@prisma/client');
+  const { PrismaPg } = require('@prisma/adapter-pg');
+  prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: testUrl }, { schema }) });
+  ({ confirmPlan } = require('../src/lib/plan-service'));
+}
 
 const helpers = {
   taskPayload: (body, userId) => ({
@@ -55,18 +64,22 @@ const plan = [
 let userId;
 
 test.before(async () => {
-  // Same as server start: some columns are only added at runtime.
-  await ensureSchema(prisma);
+  if (skip) return;
   const user = await prisma.user.create({ data: { email: 'plan@test.local', passwordHash: 'x', displayName: 'Plan Tester' } });
   userId = user.id;
 });
 
 test.after(async () => {
+  if (!prisma) return;
   await prisma.$disconnect();
-  for (const suffix of ['', '-shm', '-wal', '-journal']) fs.rmSync(`${dbFile}${suffix}`, { force: true });
+  const { Client } = require('pg');
+  const client = new Client({ connectionString: testUrl });
+  await client.connect();
+  await client.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+  await client.end();
 });
 
-test('confirming the same plan twice creates the tasks once', async () => {
+test('confirming the same plan twice creates the tasks once', { skip }, async () => {
   const first = await confirmPlan(prisma, userId, { idempotencyKey: 'plan-key-0001', tasks: plan }, helpers);
   assert.equal(first.created.length, 3);
   assert.equal(first.replayed, undefined);
@@ -78,7 +91,7 @@ test('confirming the same plan twice creates the tasks once', async () => {
   assert.equal(await prisma.task.count({ where: { userId } }), 3);
 });
 
-test('simultaneous double taps do not duplicate tasks', async () => {
+test('simultaneous double taps do not duplicate tasks', { skip }, async () => {
   const results = await Promise.allSettled([
     confirmPlan(prisma, userId, { idempotencyKey: 'plan-key-0002', tasks: plan.slice(0, 1) }, helpers),
     confirmPlan(prisma, userId, { idempotencyKey: 'plan-key-0002', tasks: plan.slice(0, 1) }, helpers),
@@ -89,7 +102,7 @@ test('simultaneous double taps do not duplicate tasks', async () => {
   assert.equal(await prisma.task.count({ where: { userId, title: 'Study Python' } }), 2);
 });
 
-test('a corrected suggestion is saved to the planning profile', async () => {
+test('a corrected suggestion is saved to the planning profile', { skip }, async () => {
   const row = await prisma.planningProfile.findUnique({ where: { userId } });
   const profile = JSON.parse(row.data);
   assert.deepEqual(profile.corrections.map((c) => [c.type, c.field, c.to]), [
@@ -99,7 +112,7 @@ test('a corrected suggestion is saved to the planning profile', async () => {
   assert.equal(profile.habits.exercise.start, '06:00');
 });
 
-test('invalid plans are rejected before anything is saved', async () => {
+test('invalid plans are rejected before anything is saved', { skip }, async () => {
   const before = await prisma.task.count({ where: { userId } });
   await assert.rejects(confirmPlan(prisma, userId, { idempotencyKey: 'plan-key-0003', tasks: [] }, helpers), { status: 400 });
   await assert.rejects(confirmPlan(prisma, userId, { idempotencyKey: 'plan-key-0003', tasks: [{ title: '', date: '2026-10-16' }] }, helpers), { status: 400 });

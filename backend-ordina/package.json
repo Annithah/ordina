@@ -13,16 +13,15 @@
     "test": "npm run test:unit && npm run db:test",
     "test:unit": "node --test \"test/**/*.test.js\"",
     "postinstall": "node node_modules/prisma/build/index.js generate",
-    "start:prod": "node node_modules/prisma/build/index.js migrate deploy && node src/server.js"
+    "start:prod": "node node_modules/prisma/build/index.js migrate deploy && node src/server.js",
+    "db:dev": "node node_modules/prisma/build/index.js dev --name ordina --detach --db-port 51214 --port 51213"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "@libsql/client": "^0.17.4",
-    "@prisma/adapter-better-sqlite3": "^7.10.0",
-    "@prisma/adapter-libsql": "^7.10.0",
+    "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "argon2": "^0.45.1",
     "better-sqlite3": "^13.0.3",

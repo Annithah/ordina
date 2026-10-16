@@ -1,0 +1,27 @@
+# Render Blueprint for the ORDINA AI backend (free plan). Database: Neon (free), not Render.
+# Render → New → Blueprint → pick this repo. Guide: backend-ordina/DEPLOY-RENDER.md
+services:
+  - type: web
+    name: ordina-api
+    runtime: node
+    plan: free
+    rootDir: backend-ordina
+    branch: frontend-ordina-001
+    buildCommand: npm ci
+    # Applies database migrations, then starts the server.
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "24"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false # Neon connection string, entered in the Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false # entered in the Render dashboard
+      - key: GEMINI_MODEL
+        value: gemini-3.8-flash

@@ -38,9 +38,16 @@ function resolveApiBaseUrl(): string {
 
 export const API_BASE_URL = resolveApiBaseUrl();
 
+/**
+ * The free production backend (Render) sleeps after 15 idle minutes and takes about a minute
+ * to wake, so release builds wait that much longer before giving up. When the phone is
+ * offline, requests still fail immediately.
+ */
+export const COLD_START_MS = __DEV__ ? 0 : 70_000;
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000,
+  timeout: 15_000 + COLD_START_MS,
   headers: {
     'Content-Type': 'application/json',
   },

@@ -6,7 +6,6 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma = require('./lib/prisma');
 const { signToken, requireUser } = require('./lib/auth');
-const { ensureSchema } = require('./lib/ensure-schema');
 const { sendMail } = require('./lib/mail');
 const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
 const ai = require('./lib/ai');
@@ -64,7 +63,7 @@ app.get('/api/health', async (_req, res) => {
     res.json({
       ok: true,
       service: 'ordina-backend',
-      db: 'sqlite',
+      db: 'postgresql',
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
@@ -267,7 +266,7 @@ app.post('/api/auth/reset', async (req, res) => {
 
 /** Deletes a user and everything they own. Used by the app and by the public deletion page. */
 async function deleteAccountData(userId) {
-  // Delete explicitly so removal does not depend on SQLite foreign-key enforcement.
+  // Delete explicitly, in dependency order, rather than relying on cascades.
   await prisma.$transaction([
       prisma.taskCategory.deleteMany({ where: { task: { userId } } }),
       prisma.taskDeadline.deleteMany({ where: { task: { userId } } }),
@@ -1272,7 +1271,6 @@ async function start() {
   }
   try {
     await prisma.$connect();
-    await ensureSchema(prisma);
     console.log('ORDINA db: connected');
   } catch (error) {
     console.error('ORDINA db: failed to connect', error);

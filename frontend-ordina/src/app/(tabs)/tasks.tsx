@@ -118,10 +118,18 @@ export default function TasksScreen() {
   const today = localDateKey();
   const [selected, setSelected] = useState(today);
   const [refreshing, setRefreshing] = useState(false);
+  const [slowLoad, setSlowLoad] = useState(false);
 
   useEffect(() => {
     void loadTasks();
   }, [loadTasks]);
+
+  // The free server can take up to a minute to wake up: say so instead of showing a silent spinner.
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setSlowLoad(true), 5000);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -263,7 +271,14 @@ export default function TasksScreen() {
         ) : null}
 
         {loading && tasks.length === 0 ? (
-          <ActivityIndicator style={{ marginTop: 40 }} color={theme.primary} />
+          <View style={{ marginTop: 40, alignItems: 'center', gap: 10 }}>
+            <ActivityIndicator color={theme.primary} />
+            {slowLoad ? (
+              <ThemedText themeColor="textSecondary" style={{ textAlign: 'center' }}>
+                Waking up the ORDINA server. This can take up to a minute after a quiet period.
+              </ThemedText>
+            ) : null}
+          </View>
         ) : (
           <>
             {earlierOverdue.length ? (
