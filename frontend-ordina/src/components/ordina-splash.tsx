@@ -20,7 +20,7 @@ export function OrdinaSplashOverlay() {
 
   const logo = (
     <Image
-      source={require('@/assets/images/ordina-logo.png')}
+      source={require('@/assets/images/ordina-logo-transparent.png')}
       style={styles.logo}
       contentFit="contain"
       accessibilityLabel="ORDINA"
