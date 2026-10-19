@@ -3,7 +3,7 @@
 /** Where a value came from: the user's words, an ORDINA suggestion, or the user's learned habits. */
 export type ValueSource = 'user' | 'ai' | 'habit';
 
-export type PlanField = 'date' | 'startTime' | 'durationMinutes' | 'priority';
+export type PlanField = 'date' | 'startTime' | 'durationMinutes' | 'priority' | 'categoryId';
 
 export type PlanPriority = 'low' | 'medium' | 'high';
 
@@ -12,12 +12,16 @@ export type PlanTask = {
   description: string | null;
   type: string;
   date: string;
+  /** null: Anytime (no fixed time). */
   startTime: string | null;
-  durationMinutes: number;
+  /** null: no duration. */
+  durationMinutes: number | null;
   priority: PlanPriority;
+  /** Suggested on the phone from the title; the user can change it in the preview. */
+  categoryId: string;
   deadline: string | null;
   timeWindow: 'morning' | 'afternoon' | 'evening' | 'night' | null;
-  sources: Record<PlanField, ValueSource>;
+  sources: Record<Exclude<PlanField, 'categoryId'>, ValueSource> & { categoryId?: ValueSource };
   note: string | null;
   adjustedNote?: string;
   warnings: string[];
@@ -26,7 +30,7 @@ export type PlanTask = {
     startTime: string | null;
     durationMinutes: number | null;
     priority: PlanPriority | null;
-    sources: Record<PlanField, ValueSource>;
+    sources: Record<Exclude<PlanField, 'categoryId'>, ValueSource>;
   };
 };
 
@@ -37,10 +41,13 @@ export type PlanQuestion = {
   options: string[];
 };
 
+/** A task as the server sends it: no category yet (the phone suggests one). */
+export type ServerPlanTask = Omit<PlanTask, 'categoryId'> & { categoryId?: string };
+
 export type Plan = {
   planId: string;
   summary: string;
-  tasks: PlanTask[];
+  tasks: ServerPlanTask[];
   questions: PlanQuestion[];
   assumptions: string[];
   today: string;
