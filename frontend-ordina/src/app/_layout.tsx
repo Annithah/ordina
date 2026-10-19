@@ -49,6 +49,7 @@ function RootStack() {
         <Stack.Screen name="goals" />
         <Stack.Screen name="reminders" />
         <Stack.Screen name="integrations" />
+        <Stack.Screen name="categories" />
       </Stack>
       <ToastHost />
     </NavigationThemeProvider>
