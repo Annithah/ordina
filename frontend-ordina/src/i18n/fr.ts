@@ -5,6 +5,10 @@ const fr: typeof en = {
   brand: {
     tagline: 'Mettez de l’ordre dans votre journée',
   },
+  crash: {
+    title: 'ORDINA AI a rencontré un problème',
+    body: 'Vos tâches sur ce téléphone sont en sécurité. Faites une capture de cet écran et envoyez-la au développeur.',
+  },
   common: {
     back: 'Retour',
     cancel: 'Annuler',
