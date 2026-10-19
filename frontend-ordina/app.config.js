@@ -75,7 +75,9 @@ module.exports = ({ config }) => {
   if (LAPTOP_SERVER && !/^http:\/\/[\w.-]+(:\d+)?\/?$/i.test(apiUrl)) {
     throw new Error(`Laptop test server must look like http://192.168.1.20:4000 (got "${apiUrl}").`);
   }
-  if (!LAPTOP_SERVER && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
+  // An empty address is allowed on purpose: a test build before the server is deployed. The app
+  // then works offline and shows "Server not connected yet" for accounts and ORDINA AI.
+  if (apiUrl && !LAPTOP_SERVER && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
     throw new Error(`Store build needs EXPO_PUBLIC_API_URL set to the HTTPS production backend (got "${apiUrl}").`);
   }
 
