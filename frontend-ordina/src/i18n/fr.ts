@@ -320,6 +320,17 @@ const fr: typeof en = {
     serverNotConnected: 'Serveur pas encore connecté',
     synced: 'Vos tâches sont sauvegardées',
   },
+  intro: {
+    progress: 'Étape {n} sur {total}',
+    s1Title: 'Planifiez votre journée',
+    s1Body: "Ajoutez des tâches avec une heure, ou « N'importe quand » dans la journée.",
+    s2Title: 'Écrivez tout d’un coup',
+    s2Body: 'Tapez votre programme en un paragraphe. ORDINA le découpe en tâches.',
+    s3Title: 'ORDINA AI organise',
+    s3Body: 'ORDINA AI transforme vos mots en programme. Il faut internet.',
+    s4Title: 'Gardez le cap',
+    s4Body: 'Catégories, recherche et rappels vous guident, même hors ligne.',
+  },
   plan: {
     reviewTitle: 'Vérifiez votre programme',
     reviewSub: "Rien n'est enregistré avant que vous l'ajoutiez. Modifiez ou retirez ce que vous voulez.",

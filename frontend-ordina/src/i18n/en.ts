@@ -318,6 +318,17 @@ const en = {
     serverNotConnected: 'Server not connected yet',
     synced: 'Your tasks are backed up',
   },
+  intro: {
+    progress: 'Step {n} of {total}',
+    s1Title: 'Plan your day',
+    s1Body: 'Add tasks with a time, or mark them “Anytime” for the day.',
+    s2Title: 'Write it all at once',
+    s2Body: 'Type your plan in one paragraph. ORDINA splits it into tasks.',
+    s3Title: 'Let ORDINA AI organise',
+    s3Body: 'ORDINA AI turns your words into a day plan. It needs internet.',
+    s4Title: 'Stay on track',
+    s4Body: 'Categories, search and reminders keep you on track, even offline.',
+  },
   plan: {
     reviewTitle: 'Review your plan',
     reviewSub: 'Nothing is saved until you add it. Edit or remove anything first.',
