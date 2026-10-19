@@ -21,7 +21,7 @@ import { useI18n } from '@/providers/i18n-provider';
 import { deleteAccount } from '@/services/ai';
 import { disconnectGoogleCalendar } from '@/services/google-calendar';
 import { useAuthStore } from '@/store/auth-store';
-import { LOCALES } from '@/i18n/translations';
+import { LANGUAGES } from '@/i18n';
 import { FEATURES, LOCAL_MODE } from '@/config/release';
 import { deleteAllLocalData } from '@/services/local-tasks';
 import { toast } from '@/components/toast';
@@ -98,7 +98,7 @@ export default function ProfileScreen() {
   const user = useAuthStore((s) => s.user);
   const signOut = useAuthStore((s) => s.signOut);
   const loadTasks = useTasksStore((s) => s.loadTasks);
-  const languageLabel = LOCALES.find((item) => item.id === locale)?.native ?? 'English';
+  const languageLabel = LANGUAGES.find((item) => item.id === locale)?.native ?? 'English';
   // Offline build: no real account yet, so show the account screen instead of the user card.
   const account = useAccountScreen();
   const showAccountDesign = !FEATURES.accounts;
