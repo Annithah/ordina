@@ -3,6 +3,10 @@ const en = {
   brand: {
     tagline: 'Put order in your day',
   },
+  crash: {
+    title: 'ORDINA AI hit a problem',
+    body: 'Your tasks on this phone are safe. Please take a screenshot of this screen and send it to the developer.',
+  },
   common: {
     back: 'Back',
     cancel: 'Cancel',

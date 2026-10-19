@@ -8,6 +8,10 @@ const rw: typeof en = {
   brand: {
     tagline: 'Shyira gahunda ku munsi wawe',
   },
+  crash: {
+    title: 'ORDINA AI yagize ikibazo',
+    body: 'Imirimo yawe iri kuri iyi telefoni irinzwe. Fata ifoto y’iyi shusho uyoherereze uwakoze porogaramu.',
+  },
   common: {
     back: 'Subira inyuma',
     cancel: 'Reka',
