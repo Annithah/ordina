@@ -1,6 +1,6 @@
 import { LOCAL_MODE } from '@/config/release';
 import { api, COLD_START_MS } from '@/services/api';
-import { withLaptop } from '@/services/device-session';
+import { withAiSession } from '@/services/device-session';
 import { confirmLocalPlan } from '@/services/local-tasks';
 import { useTasksStore } from '@/store/tasks-store';
 import type { CalendarBusyEvent } from '@/services/google-calendar';
@@ -38,9 +38,9 @@ export async function requestPlan(payload: {
     const { data } = await api.post('/api/ai/plan', body, { timeout: 60_000 + COLD_START_MS });
     return data as Plan;
   }
-  // Offline mode: the laptop has no copy of the tasks, so send what planning needs.
+  // Tasks live on the phone: send only what planning needs (busy times and recent habits).
   const context = localPlanningContext(localDateKey(now));
-  return withLaptop(async (headers) => (await api.post('/api/ai/plan', { ...body, ...context }, { timeout: 60_000, headers })).data as Plan);
+  return withAiSession(async (headers) => (await api.post('/api/ai/plan', { ...body, ...context }, { timeout: 60_000 + COLD_START_MS, headers })).data as Plan);
 }
 
 /** Busy times for the coming week (overlap checks) and recent tasks (learned habits). */
@@ -64,11 +64,11 @@ function localPlanningContext(today: string) {
 export async function confirmPlan(planId: string, tasks: unknown[]) {
   if (LOCAL_MODE) {
     // Saved on the phone (exactly once per plan id). Learning from the user's edits is
-    // best-effort: the tasks are already saved even if the laptop is unreachable.
+    // best-effort: the tasks are already saved even if the server is unreachable.
     const result = await confirmLocalPlan(planId, tasks as Record<string, unknown>[]);
     if (!result.replayed) {
       const { history } = localPlanningContext(localDateKey());
-      void withLaptop((headers) => api.post('/api/ai/plan/learn', { tasks, history }, { timeout: 15_000, headers })).catch(() => undefined);
+      void withAiSession((headers) => api.post('/api/ai/plan/learn', { tasks, history }, { timeout: 15_000, headers })).catch(() => undefined);
     }
     return result;
   }
@@ -103,7 +103,7 @@ export async function interpretFromMedia(payload: {
 
 export async function transcribeAudio(audio: string, mimeType?: string) {
   if (LOCAL_MODE) {
-    return withLaptop(async (headers) => (await api.post('/api/ai/transcribe', { audio, mimeType }, { timeout: 90000, headers })).data.text as string);
+    return withAiSession(async (headers) => (await api.post('/api/ai/transcribe', { audio, mimeType }, { timeout: 90_000 + COLD_START_MS, headers })).data.text as string);
   }
   const { data } = await api.post('/api/ai/transcribe', { audio, mimeType }, { timeout: 90000 });
   return data.text as string;
