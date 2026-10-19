@@ -10,6 +10,7 @@ import { Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { useCategories } from '@/hooks/use-categories';
 import { useTheme } from '@/hooks/use-theme';
 import { useTasksStore, type Task } from '@/store/tasks-store';
 import { localDateKey } from '@/utils/dates';
@@ -31,18 +32,6 @@ function formatHour(h: number): string {
   return `${display} ${period}`;
 }
 
-function getCategoryColor(category: string): string {
-  const map: Record<string, string> = {
-    work: '#5C4DF2',
-    health: '#22C55E',
-    learning: '#7C3AED',
-    personal: '#F59E0B',
-    design: '#EC4899',
-    database: '#06B6D4',
-  };
-  return map[category] ?? '#64748B';
-}
-
 function getWeekDays(baseDate: Date): Date[] {
   const day = baseDate.getDay();
   const monday = new Date(baseDate);
@@ -61,6 +50,7 @@ function hourOf(task: Task) {
 
 export default function CalendarScreen() {
   const theme = useTheme();
+  const categoryInfo = useCategories();
   const { tasks, loadTasks } = useTasksStore();
   const scrollRef = useRef<ScrollView>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -146,7 +136,7 @@ export default function CalendarScreen() {
 
   function renderTask(t: Task) {
     const health = taskHealth(t, now);
-    const color = getCategoryColor(t.category);
+    const color = categoryInfo.find(t.categoryId).color;
     return (
       <Pressable
         key={t.id}

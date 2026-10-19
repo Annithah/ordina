@@ -2,19 +2,21 @@
  * Task rules for tasks stored on the phone (offline mode). Same rules and messages as the
  * server: backend-ordina/src/lib/task-validation.js. Keep the two files in step.
  */
+import { DURATION_MAX, DURATION_MIN } from '@/logic/schedule';
+import { isReminderOption, localDateTime, type ReminderOption } from '@/logic/reminders';
 import { isValidDateKey, isValidTime } from '@/utils/task-validation';
 
 export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 2000;
-const MIN_DURATION = 5;
-const MAX_DURATION = 24 * 60;
+const MIN_DURATION = DURATION_MIN;
+const MAX_DURATION = DURATION_MAX;
 
 const PRIORITIES = new Set(['low', 'medium', 'high']);
 const STATUSES = new Set(['todo', 'pending', 'in_progress', 'completed']);
-const CATEGORIES = new Set(['work', 'personal', 'health', 'learning', 'design', 'database']);
+const CATEGORY_ID = /^[\w-]{1,64}$/;
 
 export type TaskRuleErrors = Partial<Record<
-  'title' | 'description' | 'dueDate' | 'startTime' | 'duration' | 'priority' | 'status' | 'category' | 'deadline',
+  'title' | 'description' | 'dueDate' | 'startTime' | 'duration' | 'priority' | 'status' | 'categoryId' | 'deadline' | 'reminder',
   string
 >>;
 
@@ -27,8 +29,10 @@ export type ValidTaskFields = {
   priority?: 'low' | 'medium' | 'high';
   status?: 'pending' | 'in_progress' | 'completed';
   completed?: boolean;
-  category?: string | null;
+  categoryId?: string;
   deadline?: string | null;
+  reminder?: ReminderOption;
+  reminderAt?: string | null;
 };
 
 /** Accepts "1h 30m", "45m", "2h" or a number of minutes. Returns minutes or null. */
@@ -96,7 +100,7 @@ export function validateTaskInput(body: Record<string, unknown>, { partial = fal
     } else {
       const minutes = parseDurationMinutes(rawDuration);
       if (minutes === null || minutes < MIN_DURATION || minutes > MAX_DURATION) {
-        errors.duration = `Duration must be between ${MIN_DURATION} minutes and 24 hours.`;
+        errors.duration = `Duration must be between ${MIN_DURATION} minutes and ${MAX_DURATION / 60} hours.`;
       } else {
         value.duration = formatDurationValue(minutes);
       }
@@ -117,10 +121,21 @@ export function validateTaskInput(body: Record<string, unknown>, { partial = fal
 
   if (has('completed')) value.completed = Boolean(input.completed);
 
-  if (has('category')) {
-    const category = String(input.category || '').toLowerCase();
-    if (category && !CATEGORIES.has(category)) errors.category = 'Unknown category.';
-    else value.category = category || null;
+  if (has('categoryId')) {
+    const categoryId = String(input.categoryId ?? '');
+    if (!CATEGORY_ID.test(categoryId)) errors.categoryId = 'Please choose a category.';
+    else value.categoryId = categoryId;
+  }
+
+  if (has('reminder')) {
+    if (!isReminderOption(input.reminder)) errors.reminder = 'Please choose a reminder.';
+    else value.reminder = input.reminder;
+  }
+
+  if (has('reminderAt')) {
+    if (input.reminderAt === null || input.reminderAt === '') value.reminderAt = null;
+    else if (typeof input.reminderAt !== 'string' || !localDateTime(input.reminderAt)) errors.reminder = 'Please choose a valid reminder time.';
+    else value.reminderAt = input.reminderAt;
   }
 
   if (has('deadline')) {
