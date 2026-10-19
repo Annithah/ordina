@@ -13,6 +13,7 @@ import { ToastHost } from '@/components/toast';
 import { CrashScreen } from '@/crash-guard';
 import { ThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import { I18nProvider } from '@/providers/i18n-provider';
+import { useAppBootstrap } from '@/services/app-bootstrap';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
 import { useLockStore } from '@/store/lock-store';
@@ -22,6 +23,7 @@ function RootStack() {
   const { scheme, colors } = useAppTheme();
   const isSignedIn = useAuthStore((s) => s.isSignedIn);
   useArrivalWatch(isSignedIn && FEATURES.arrivalReminders);
+  useAppBootstrap();
 
   return (
     <NavigationThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
