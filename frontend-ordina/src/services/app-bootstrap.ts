@@ -5,8 +5,11 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
 
+import { scheduleBackupReminder } from '@/services/backup';
 import { loadNotifications } from '@/services/notifications';
+import { startSync } from '@/services/sync';
 import { rescheduleAll } from '@/services/task-reminders';
+import { useAuthStore } from '@/store/auth-store';
 import { onSettingsChanged, useSettingsStore } from '@/store/settings-store';
 import { useTasksStore } from '@/store/tasks-store';
 
@@ -26,12 +29,17 @@ export function useAppBootstrap() {
       await useTasksStore.getState().loadTasks();
       if (alive) await rescheduleAll(useTasksStore.getState().tasks).catch(() => undefined);
     })();
+    const stopSync = startSync();
     const offSettings = onSettingsChanged((changes) => {
       if ('remindersEnabled' in changes) void rescheduleAll(useTasksStore.getState().tasks).catch(() => undefined);
+      if ('backupReminderEnabled' in changes || 'backupFrequency' in changes) {
+        void scheduleBackupReminder(useAuthStore.getState().isSignedIn).catch(() => undefined);
+      }
     });
     return () => {
       alive = false;
       offSettings();
+      stopSync();
     };
   }, []);
 
