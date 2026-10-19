@@ -1,5 +1,8 @@
 /** English: the fallback language. fr.ts and rw.ts must have exactly these keys. */
 const en = {
+  brand: {
+    tagline: 'Put order in your day',
+  },
   common: {
     back: 'Back',
     cancel: 'Cancel',
@@ -433,6 +436,8 @@ const en = {
     dayDone: '{done} of {total} done',
   },
   schedule: {
+    prevMonth: 'Previous month',
+    nextMonth: 'Next month',
     title: 'Schedule',
     weekView: 'Week',
     monthView: 'Month',

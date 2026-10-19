@@ -2,6 +2,9 @@
 import type en from './en.ts';
 
 const fr: typeof en = {
+  brand: {
+    tagline: 'Mettez de l’ordre dans votre journée',
+  },
   common: {
     back: 'Retour',
     cancel: 'Annuler',
@@ -435,6 +438,8 @@ const fr: typeof en = {
     dayDone: '{done} sur {total} terminées',
   },
   schedule: {
+    prevMonth: 'Mois précédent',
+    nextMonth: 'Mois suivant',
     title: 'Agenda',
     weekView: 'Semaine',
     monthView: 'Mois',

@@ -5,6 +5,9 @@
 import type en from './en.ts';
 
 const rw: typeof en = {
+  brand: {
+    tagline: 'Shyira gahunda ku munsi wawe',
+  },
   common: {
     back: 'Subira inyuma',
     cancel: 'Reka',
@@ -438,6 +441,8 @@ const rw: typeof en = {
     dayDone: '{done} kuri {total} byarangiye',
   },
   schedule: {
+    prevMonth: 'Ukwezi gushize',
+    nextMonth: 'Ukwezi gutaha',
     title: 'Gahunda',
     weekView: 'Icyumweru',
     monthView: 'Ukwezi',
