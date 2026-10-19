@@ -55,7 +55,7 @@ export type BackupFile = {
 };
 
 /** Settings that only make sense on this phone are never exported or imported. */
-export const DEVICE_ONLY_SETTINGS = ['lastExportAt', 'syncCursor', 'lastSyncAt'];
+export const DEVICE_ONLY_SETTINGS = ['lastExportAt', 'syncCursor', 'lastSyncAt', 'firstUseAt'];
 
 export function buildBackup(tasks: BackupTask[], categories: BackupCategory[], settings: Record<string, unknown>, now = new Date()): BackupFile {
   const portable = Object.fromEntries(Object.entries(settings).filter(([key]) => !DEVICE_ONLY_SETTINGS.includes(key)));
