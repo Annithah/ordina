@@ -55,7 +55,7 @@ export interface Task {
   contactPhone?: string;
 }
 
-export type TaskInput = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'categoryId' | 'reminder'>> & {
+export type TaskInput = Partial<Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'categoryId' | 'reminder' | 'startTime' | 'duration' | 'dueDate'>> & {
   title?: string;
   categoryId?: string;
   reminder?: ReminderOption;
