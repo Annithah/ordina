@@ -310,8 +310,9 @@ function sanitizeKeepTasks(keepTasks, today) {
 /**
  * @returns {Promise<{ planId, summary, tasks, questions, assumptions, today }>}
  */
-async function createPlan({ message, answers, keepTasks, timezone, clientToday, clientTime, existingTasks, profile, generate = geminiJson }) {
-  const clock = resolveNow({ timezone, clientToday, clientTime });
+async function createPlan({ message, answers, keepTasks, timezone, clientToday, clientTime, existingTasks, profile, generate = geminiJson, now }) {
+  // `now` is only passed by tests, so a fixed date keeps working on any day.
+  const clock = resolveNow({ timezone, clientToday, clientTime, now });
   const busy = busyBlocks(existingTasks, clock.today);
   const kept = sanitizeKeepTasks(keepTasks, clock.today);
   const raw = await generate(
