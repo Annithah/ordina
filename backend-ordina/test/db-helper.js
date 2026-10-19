@@ -3,6 +3,8 @@
  * test branch). Each run uses its own schema, applies the migrations, and drops it afterwards.
  * Without TEST_DATABASE_URL these tests are skipped.
  */
+require('dotenv').config({ quiet: true });
+
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -33,7 +35,10 @@ function setup() {
   // The pg adapter needs the schema passed explicitly.
   const { PrismaClient } = require('@prisma/client');
   const { PrismaPg } = require('@prisma/adapter-pg');
-  prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: base }, { schema }) });
+  // Raw SQL (sync) uses plain table names, so the connection's search_path must point at the schema too.
+  const withSearchPath = new URL(base);
+  withSearchPath.searchParams.set('options', `-c search_path=${schema}`);
+  prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: withSearchPath.toString() }, { schema }) });
   require.cache[require.resolve('../src/lib/prisma')] = { exports: prisma, loaded: true, id: 'prisma', filename: 'prisma' };
   return prisma;
 }
