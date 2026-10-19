@@ -1,13 +1,29 @@
+import { OTHER_CATEGORY_ID, suggestCategoryId } from '@/logic/categories';
 import type { DraftTask, PlanField, PlanTask, ValueSource } from '@/types/plan';
 import { addLocalDays } from '@/utils/dates';
 import { minutesFromTime, timeFromMinutes } from '@/utils/task-planning';
 
 let counter = 0;
 
-export function toDrafts(tasks: PlanTask[]): DraftTask[] {
+/**
+ * Plan tasks -> editable drafts. Tasks without a category get one suggested from the title
+ * (only among `categoryIds`, the user's categories), else "Other".
+ */
+export function toDrafts(tasks: (Omit<PlanTask, 'categoryId'> & { categoryId?: string })[], categoryIds?: string[]): DraftTask[] {
   return tasks.map((task) => {
     counter += 1;
-    return { ...task, key: `t${counter}`, edited: {} };
+    const suggested = suggestCategoryId(task.title, categoryIds);
+    const fallback = categoryIds && !categoryIds.includes(OTHER_CATEGORY_ID) ? categoryIds[0] ?? OTHER_CATEGORY_ID : OTHER_CATEGORY_ID;
+    const categoryId = task.categoryId ?? suggested ?? fallback;
+    const source: ValueSource = task.categoryId ? (task.sources.categoryId ?? 'user') : suggested ? 'ai' : 'user';
+    return {
+      ...task,
+      durationMinutes: task.durationMinutes ?? null,
+      categoryId,
+      sources: { ...task.sources, categoryId: source },
+      key: `t${counter}`,
+      edited: {},
+    };
   });
 }
 
@@ -28,7 +44,7 @@ export function shiftDate(date: string, deltaDays: number, earliest: string) {
 
 /** The source to display: anything the user edited is theirs. */
 export function displaySource(task: DraftTask, field: PlanField): ValueSource {
-  return task.edited[field] ? 'user' : task.sources[field];
+  return task.edited[field] ? 'user' : task.sources[field] ?? 'user';
 }
 
 /** Body for POST /api/ai/plan/confirm. */
@@ -41,6 +57,7 @@ export function toConfirmPayload(tasks: DraftTask[]) {
     startTime: task.startTime,
     durationMinutes: task.durationMinutes,
     priority: task.priority,
+    categoryId: task.categoryId,
     deadline: task.deadline,
     original: task.original,
   }));
@@ -52,11 +69,11 @@ export function toKeepTasks(tasks: DraftTask[]) {
 }
 
 /** Restores each kept task's edit markers after a re-plan (matched by title). */
-export function mergeReplan(previous: DraftTask[], next: PlanTask[]): DraftTask[] {
+export function mergeReplan(previous: DraftTask[], next: Omit<PlanTask, 'categoryId'>[], categoryIds?: string[]): DraftTask[] {
   const byTitle = new Map(previous.map((task) => [task.title.trim().toLowerCase(), task]));
-  return toDrafts(next).map((task) => {
+  return toDrafts(next, categoryIds).map((task) => {
     const before = byTitle.get(task.title.trim().toLowerCase());
-    return before ? { ...task, sources: before.sources, edited: before.edited } : task;
+    return before ? { ...task, categoryId: before.categoryId, sources: before.sources, edited: before.edited } : task;
   });
 }
 
@@ -65,7 +82,8 @@ export function overlapsByTask(tasks: DraftTask[]) {
   const result = new Map<string, string[]>();
   const span = (task: DraftTask) => {
     const start = minutesFromTime(task.startTime ?? undefined);
-    return start === null ? null : [start, start + task.durationMinutes] as const;
+    // No duration still occupies its starting minute.
+    return start === null ? null : [start, start + Math.max(1, task.durationMinutes ?? 0)] as const;
   };
   for (const task of tasks) {
     const own = span(task);
