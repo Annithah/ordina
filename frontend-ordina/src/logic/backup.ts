@@ -84,7 +84,8 @@ const isIso = (v: unknown) => typeof v === 'string' && !Number.isNaN(Date.parse(
 const optional = (v: unknown, test: (s: string) => boolean) => v === null || v === undefined || (typeof v === 'string' && test(v));
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
 
-function checkTask(raw: unknown, index: number): BackupTask {
+/** Checks one task row (from a backup file or the server). Throws BackupError. */
+export function validateTaskRow(raw: unknown, index: number): BackupTask {
   const fail = (field: string) => {
     throw new BackupError('invalid', `task ${index + 1} ${field}`);
   };
@@ -123,7 +124,8 @@ function checkTask(raw: unknown, index: number): BackupTask {
   };
 }
 
-function checkCategory(raw: unknown, index: number): BackupCategory {
+/** Checks one category row (from a backup file or the server). Throws BackupError. */
+export function validateCategoryRow(raw: unknown, index: number): BackupCategory {
   const fail = (field: string) => {
     throw new BackupError('invalid', `category ${index + 1} ${field}`);
   };
@@ -163,8 +165,8 @@ export function parseBackup(text: string): BackupFile {
   if (file.format > BACKUP_FORMAT) throw new BackupError('newerFormat');
   if (!Array.isArray(file.tasks) || !Array.isArray(file.categories)) throw new BackupError('invalid', 'lists');
   if (file.tasks.length > MAX_BACKUP_TASKS || file.categories.length > MAX_BACKUP_CATEGORIES) throw new BackupError('tooLarge');
-  const tasks = file.tasks.map(checkTask);
-  const categories = file.categories.map(checkCategory);
+  const tasks = file.tasks.map(validateTaskRow);
+  const categories = file.categories.map(validateCategoryRow);
   if (new Set(tasks.map((t) => t.id)).size !== tasks.length || new Set(categories.map((c) => c.id)).size !== categories.length) {
     throw new BackupError('invalid', 'duplicate ids');
   }
