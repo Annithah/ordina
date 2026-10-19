@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, TextInput, View, type TextInputProps } from 'rea
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 
 type AuthFieldProps = TextInputProps & {
   label: string;
@@ -14,6 +15,7 @@ type AuthFieldProps = TextInputProps & {
 
 export function AuthField({ label, isPassword, error, style, ...rest }: AuthFieldProps) {
   const theme = useTheme();
+  const { t } = useI18n();
   const [hidden, setHidden] = useState(Boolean(isPassword));
 
   return (
@@ -30,9 +32,9 @@ export function AuthField({ label, isPassword, error, style, ...rest }: AuthFiel
         {isPassword ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={hidden ? 'Show password' : 'Hide password'}
+            accessibilityLabel={hidden ? t('account.showPassword') : t('account.hidePassword')}
             onPress={() => setHidden((v) => !v)}
-            hitSlop={8}>
+            hitSlop={12}>
             <Ionicons name={hidden ? 'eye-outline' : 'eye-off-outline'} size={20} color={theme.text} />
           </Pressable>
         ) : null}
