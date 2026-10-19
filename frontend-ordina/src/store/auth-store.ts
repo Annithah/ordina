@@ -100,7 +100,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   hydrate: async () => {
     const [onboarding, session] = await Promise.all([read(ONBOARDING_KEY), loadSession()]);
     set({ hydrated: true, hasSeenOnboarding: onboarding === '1', isSignedIn: Boolean(session), user: session?.user ?? null });
-    if (session) notify(true);
+    notify(Boolean(session));
   },
 
   completeOnboarding: async () => {
