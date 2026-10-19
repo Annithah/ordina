@@ -19,7 +19,7 @@ export const PARSED_TITLE_MAX = 100;
 export const DEFAULT_DURATION_MINUTES = 60;
 
 export const SUGGESTED_TIMES = { morning: '09:00', afternoon: '14:00', evening: '18:00', night: '20:00' } as const;
-type PartOfDay = keyof typeof SUGGESTED_TIMES;
+export type PartOfDay = keyof typeof SUGGESTED_TIMES;
 
 export type ParsedPriority = 'low' | 'medium' | 'high';
 
@@ -31,8 +31,10 @@ export type ParsedTask = {
   dateFromText: boolean;
   /** HH:MM (24 h) or null for "any time". */
   startTime: string | null;
-  /** True when ORDINA picked the time (morning/evening, or "after that"). */
+  /** Always false: ORDINA no longer guesses times (kept for older callers). */
   timeSuggested: boolean;
+  /** "in the evening" etc. when no time was given: a hint only, the task stays Anytime. */
+  partOfDay: PartOfDay | null;
   durationMinutes: number | null;
   priority: ParsedPriority;
   priorityFromText: boolean;
@@ -399,6 +401,7 @@ export function parseTasks(text: string, now: Date = new Date()): ParsedTask[] {
       priority: priority ?? 'medium',
       priorityFromText: priority !== null,
       after: null,
+      partOfDay: null,
       needsNewTime: false,
       sentence: fragment.sentence,
     };
@@ -409,20 +412,10 @@ export function parseTasks(text: string, now: Date = new Date()): ParsedTask[] {
       const start = nowMinutes + info.inMinutes;
       if (start < 24 * 60) task.startTime = toTime(Math.ceil(start / 5) * 5 % (24 * 60));
     }
-    if (!task.startTime && fragment.join === 'after' && previous) {
-      task.after = previous.title;
-      if (previous.startTime && previous.date === key) {
-        const start = toMinutes(previous.startTime) + (previous.durationMinutes ?? DEFAULT_DURATION_MINUTES);
-        if (start < 24 * 60) {
-          task.startTime = toTime(start);
-          task.timeSuggested = true;
-        }
-      }
-    }
-    if (!task.startTime && part) {
-      task.startTime = SUGGESTED_TIMES[part];
-      task.timeSuggested = true;
-    }
+    // No time in the text: the task is "Anytime" on its day. ORDINA never guesses a time;
+    // "in the evening" and "after that" are kept as hints the user can see in the preview.
+    if (!task.startTime && fragment.join === 'after' && previous) task.after = previous.title;
+    task.partOfDay = task.startTime ? null : part;
     tasks.push(task);
   }
 
