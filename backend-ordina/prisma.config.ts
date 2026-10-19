@@ -7,7 +7,7 @@ export default defineConfig({
     path: 'prisma/migrations'
   },
   datasource: {
-    // Development: SQLite file on this laptop.
-    url: process.env.DATABASE_URL || 'file:./data/ordina.sqlite'
+    // Migrations use Neon's DIRECT connection (no "-pooler"); the running server uses the pooled one.
+    url: process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL || ''
   }
 });
