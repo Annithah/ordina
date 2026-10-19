@@ -323,6 +323,17 @@ const rw: typeof en = {
     serverNotConnected: 'Seriveri ntirahuzwa',
     synced: 'Imirimo yawe irabitswe',
   },
+  intro: {
+    progress: 'Intambwe ya {n} kuri {total}',
+    s1Title: 'Tegura umunsi wawe',
+    s1Body: 'Ongeraho imirimo ifite isaha, cyangwa “Igihe icyo ari cyo cyose” ku munsi.',
+    s2Title: 'Andika byose icyarimwe',
+    s2Body: 'Andika gahunda yawe mu gika kimwe. ORDINA iyigabanyamo imirimo.',
+    s3Title: 'ORDINA AI irategura',
+    s3Body: 'ORDINA AI ihindura amagambo yawe gahunda y’umunsi. Ikenera interineti.',
+    s4Title: 'Komeza ku murongo',
+    s4Body: 'Ibyiciro, gushakisha no kwibutswa bigufasha, kabone n’iyo nta interineti.',
+  },
   plan: {
     reviewTitle: 'Reba gahunda yawe',
     reviewSub: 'Nta kibikwa utarakyemeza. Hindura cyangwa ukureho icyo ushaka mbere.',
