@@ -8,6 +8,7 @@ import {
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { ToastHost } from '@/components/toast';
 import { CrashScreen } from '@/crash-guard';
@@ -85,10 +86,12 @@ export default function RootLayout() {
   }
 
   return (
-    <ThemeProvider>
-      <I18nProvider>
-        <RootStack />
-      </I18nProvider>
-    </ThemeProvider>
+    <KeyboardProvider>
+      <ThemeProvider>
+        <I18nProvider>
+          <RootStack />
+        </I18nProvider>
+      </ThemeProvider>
+    </KeyboardProvider>
   );
 }
