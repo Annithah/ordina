@@ -54,3 +54,29 @@ export function localeName(id: LocaleId) {
 export function interpolate(template: string, vars: Record<string, string | number>) {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? ''));
 }
+
+export function lookup(tree: PartialTranslation, path: string): string | undefined {
+  let current: unknown = tree;
+  for (const part of path.split('.')) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return typeof current === 'string' ? current : undefined;
+}
+
+// The app language for helpers outside React (day names, status labels); set by I18nProvider.
+let active: LocaleId = deviceLocale();
+
+export function setActiveLocale(locale: LocaleId) {
+  active = locale;
+}
+
+export function activeLocale(): LocaleId {
+  return active;
+}
+
+/** Text in the current app language, falling back to English. */
+export function translate(path: string, vars?: Record<string, string | number>) {
+  const value = lookup(translations[active], path) ?? lookup(translations.en, path) ?? path;
+  return vars ? interpolate(value, vars) : value;
+}

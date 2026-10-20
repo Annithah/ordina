@@ -16,6 +16,8 @@ import {
   deviceLocale,
   interpolate,
   isLocale,
+  lookup,
+  setActiveLocale,
   translations,
   type LocaleId,
   type PartialTranslation,
@@ -56,16 +58,6 @@ async function writeLocale(locale: LocaleId) {
   }
 }
 
-function lookup(tree: PartialTranslation, path: string): string | undefined {
-  const parts = path.split('.');
-  let current: unknown = tree;
-  for (const part of parts) {
-    if (!current || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return typeof current === 'string' ? current : undefined;
-}
-
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<LocaleId>(deviceLocale);
   const [ready, setReady] = useState(false);
@@ -81,6 +73,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     setLocaleState(next);
     void writeLocale(next);
   }, []);
+
+  // Helpers outside React (day names, status labels) follow the same language.
+  setActiveLocale(locale);
 
   const t = useCallback(
     (path: string, vars?: Record<string, string | number>) => {

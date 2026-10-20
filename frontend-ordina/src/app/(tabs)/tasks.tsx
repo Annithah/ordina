@@ -17,12 +17,13 @@ import { useAuthStore } from '@/store/auth-store';
 import { useTasksStore, type Task } from '@/store/tasks-store';
 import { greetingForHour } from '@/utils/date';
 import { addLocalDays, localDateKey } from '@/utils/dates';
-import { STATUS_LABEL, taskStatus, type TaskStatusLabel } from '@/utils/task-health';
+import { activeLocale, translate } from '@/i18n/translations';
+import { useI18n } from '@/providers/i18n-provider';
+import { statusLabel, taskStatus, type TaskStatusLabel } from '@/utils/task-health';
 import { durationToMinutes, formatDuration, formatTime12, friendlyDay, minutesFromTime } from '@/utils/task-planning';
 import { friendlyError } from '@/utils/task-validation';
 
 const PRIORITY_COLOR: Record<Task['priority'], string> = { high: '#EF4444', medium: '#F59E0B', low: '#3B82F6' };
-const PRIORITY_LABEL: Record<Task['priority'], string> = { high: 'High', medium: 'Medium', low: 'Low' };
 
 function dateFromKey(key: string) {
   const [y, m, d] = key.split('-').map(Number);
@@ -46,9 +47,10 @@ function byStartTime(a: Task, b: Task) {
 
 function deadlineLabel(deadline: string) {
   const [date, time] = deadline.split('T');
+  const isToday = date === localDateKey();
   const day = friendlyDay(date);
-  if (time) return day === 'Today' ? `Due by ${formatTime12(time)}` : `Due ${day} by ${formatTime12(time)}`;
-  return day === 'Today' ? 'Due today' : `Due ${day}`;
+  if (time) return isToday ? translate('tasksTab.dueBy', { time: formatTime12(time) }) : translate('tasksTab.dueDayBy', { day, time: formatTime12(time) });
+  return isToday ? translate('tasksTab.dueToday') : translate('tasksTab.dueDay', { day });
 }
 
 function statusColor(status: TaskStatusLabel, theme: ReturnType<typeof useTheme>) {
@@ -62,11 +64,11 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (task: Task) => voi
   const status = taskStatus(task);
   const color = statusColor(status, theme);
   const minutes = durationToMinutes(task.duration);
-  const time = task.startTime ? formatTime12(task.startTime) : 'Any time';
+  const time = task.startTime ? formatTime12(task.startTime) : translate('task.anytime');
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${task.title}, ${time}, ${STATUS_LABEL[status]}. Opens task details.`}
+      accessibilityLabel={`${task.title}, ${time}, ${statusLabel(status)}. ${translate('tasksTab.opensDetails')}`}
       onPress={() => router.push({ pathname: '/new-task', params: { id: task.id } })}
       style={({ pressed }) => [
         styles.row,
@@ -75,7 +77,7 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (task: Task) => voi
       <Pressable
         accessibilityRole="checkbox"
         accessibilityState={{ checked: task.completed }}
-        accessibilityLabel={task.completed ? `Mark ${task.title} as not done` : `Mark ${task.title} as done`}
+        accessibilityLabel={translate(task.completed ? 'tasksTab.markNotDone' : 'tasksTab.markDone', { title: task.title })}
         onPress={() => onToggle(task)}
         hitSlop={6}
         style={styles.checkTarget}>
@@ -92,20 +94,20 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (task: Task) => voi
           <Ionicons name="time-outline" size={13} color={theme.textSecondary} />
           <ThemedText themeColor="textSecondary" style={styles.meta}>{time} · {formatDuration(minutes)}</ThemedText>
           <View style={[styles.dot, { backgroundColor: PRIORITY_COLOR[task.priority] }]} />
-          <ThemedText themeColor="textSecondary" style={styles.meta}>{PRIORITY_LABEL[task.priority]}</ThemedText>
+          <ThemedText themeColor="textSecondary" style={styles.meta}>{translate(`task.${task.priority}`)}</ThemedText>
           {task.deadline ? (
             <>
-              <Ionicons name="flag-outline" size={13} color={theme.danger} accessibilityLabel="Deadline" />
+              <Ionicons name="flag-outline" size={13} color={theme.danger} accessibilityLabel={translate('tasksTab.deadline')} />
               <ThemedText style={[styles.meta, { color: theme.danger }]}>{deadlineLabel(task.deadline)}</ThemedText>
             </>
           ) : null}
           {task.parentTaskId || (task.recurrence && task.recurrence !== 'none') ? (
-            <Ionicons name="repeat" size={13} color={theme.textSecondary} accessibilityLabel="Repeating task" />
+            <Ionicons name="repeat" size={13} color={theme.textSecondary} accessibilityLabel={translate('tasksTab.repeating')} />
           ) : null}
         </View>
       </View>
       <View style={[styles.badge, { backgroundColor: `${color}1A` }]}>
-        <ThemedText style={[styles.badgeText, { color }]}>{STATUS_LABEL[status]}</ThemedText>
+        <ThemedText style={[styles.badgeText, { color }]}>{statusLabel(status)}</ThemedText>
       </View>
     </Pressable>
   );
@@ -113,6 +115,8 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (task: Task) => voi
 
 export default function TasksScreen() {
   const theme = useTheme();
+  // Re-renders this tab when the language changes.
+  const { t, locale } = useI18n();
   const user = useAuthStore((s) => s.user);
   const { tasks, loading, loadError, loadTasks, toggleComplete } = useTasksStore();
   const today = localDateKey();
@@ -139,9 +143,9 @@ export default function TasksScreen() {
 
   const onToggle = useCallback((task: Task) => {
     toggleComplete(task.id)
-      .then(() => toast.success(task.completed ? 'Marked as not done' : 'Nice work! Task completed'))
-      .catch((error) => toast.error(friendlyError(error, 'Could not update the task. Please try again.')));
-  }, [toggleComplete]);
+      .then(() => toast.success(task.completed ? t('tasksTab.markedNotDone') : t('tasksTab.completedToast')))
+      .catch((error) => toast.error(friendlyError(error, t('home.updateFailed'))));
+  }, [toggleComplete, t]);
 
   const days = useMemo(() => {
     const start = weekStart(selected);
@@ -170,7 +174,7 @@ export default function TasksScreen() {
   const doneToday = todayTasks.filter((task) => task.completed).length;
   const overdueTotal = tasks.filter((task) => taskStatus(task) === 'overdue').length;
   const name = user?.name?.split(' ')[0];
-  const todayLabel = dateFromKey(today).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const todayLabel = dateFromKey(today).toLocaleDateString(locale, { weekday: 'long', month: 'long', day: 'numeric' });
   const selectedDone = dayTasks.filter((task) => task.completed).length;
   const nothingToShow = dayTasks.length === 0 && earlierOverdue.length === 0 && undated.length === 0;
 
@@ -186,7 +190,7 @@ export default function TasksScreen() {
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Search tasks"
+            accessibilityLabel={t('tasksTab.searchTasks')}
             onPress={() => router.push('/search')}
             style={[styles.iconButton, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <Ionicons name="search-outline" size={20} color={theme.text} />
@@ -197,38 +201,40 @@ export default function TasksScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <ThemedText style={styles.summaryTitle}>
               {todayTasks.length === 0
-                ? 'Nothing planned today yet'
+                ? t('tasksTab.nothingToday')
                 : openToday === 0
-                  ? 'All done for today 🎉'
-                  : `${openToday} task${openToday === 1 ? '' : 's'} to go today`}
+                  ? t('tasksTab.allDone')
+                  : openToday === 1
+                    ? t('tasksTab.toGoOne')
+                    : t('tasksTab.toGo', { n: openToday })}
             </ThemedText>
             <ThemedText style={styles.summaryText}>
-              {doneToday} done{overdueTotal ? ` · ${overdueTotal} overdue` : ''}
+              {t('tasksTab.doneCount', { n: doneToday })}{overdueTotal ? ` · ${t('tasksTab.overdueCount', { n: overdueTotal })}` : ''}
             </ThemedText>
           </View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Plan with ORDINA AI"
+            accessibilityLabel={t('tasksTab.planWithAi')}
             onPress={() => router.push('/ai')}
             style={styles.aiButton}>
             <OrdinaMark size={24} />
-            <ThemedText style={[styles.aiButtonText, { color: theme.primary }]}>Plan with AI</ThemedText>
+            <ThemedText style={[styles.aiButtonText, { color: theme.primary }]}>{t('tasksTab.planWithAi')}</ThemedText>
           </Pressable>
         </View>
 
         <View style={styles.weekHead}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Previous week" onPress={() => setSelected(addLocalDays(selected, -7))} style={styles.navButton}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('tasksTab.previousWeek')} onPress={() => setSelected(addLocalDays(selected, -7))} style={styles.navButton}>
             <Ionicons name="chevron-back" size={20} color={theme.text} />
           </Pressable>
           <ThemedText style={styles.weekTitle}>
-            {dateFromKey(days[0]).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            {dateFromKey(days[0]).toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
           </ThemedText>
           {selected !== today ? (
             <Pressable accessibilityRole="button" onPress={() => setSelected(today)} style={[styles.todayPill, { borderColor: theme.primary }]}>
-              <ThemedText style={[styles.todayPillText, { color: theme.primary }]}>Today</ThemedText>
+              <ThemedText style={[styles.todayPillText, { color: theme.primary }]}>{t('task.today')}</ThemedText>
             </Pressable>
           ) : null}
-          <Pressable accessibilityRole="button" accessibilityLabel="Next week" onPress={() => setSelected(addLocalDays(selected, 7))} style={styles.navButton}>
+          <Pressable accessibilityRole="button" accessibilityLabel={t('tasksTab.nextWeek')} onPress={() => setSelected(addLocalDays(selected, 7))} style={styles.navButton}>
             <Ionicons name="chevron-forward" size={20} color={theme.text} />
           </Pressable>
         </View>
@@ -244,14 +250,14 @@ export default function TasksScreen() {
                 key={key}
                 accessibilityRole="button"
                 accessibilityState={{ selected: active }}
-                accessibilityLabel={`${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}${open ? `, ${open} open tasks` : ''}`}
+                accessibilityLabel={`${date.toLocaleDateString(locale, { weekday: 'long', month: 'long', day: 'numeric' })}${open ? `, ${t('tasksTab.openTasks', { n: open })}` : ''}`}
                 onPress={() => setSelected(key)}
                 style={[
                   styles.day,
                   { backgroundColor: active ? theme.primary : theme.card, borderColor: active ? theme.primary : isToday ? theme.primary : theme.border },
                 ]}>
                 <ThemedText style={[styles.dayName, { color: active ? '#FFFFFF' : theme.textSecondary }]}>
-                  {date.toLocaleDateString(undefined, { weekday: 'narrow' })}
+                  {date.toLocaleDateString(activeLocale(), { weekday: 'narrow' })}
                 </ThemedText>
                 <ThemedText style={[styles.dayNumber, { color: active ? '#FFFFFF' : theme.text }]}>{date.getDate()}</ThemedText>
                 <View style={[styles.dayDot, { backgroundColor: open ? (active ? '#FFFFFF' : theme.primary) : 'transparent' }]} />
@@ -265,7 +271,7 @@ export default function TasksScreen() {
             <Ionicons name="cloud-offline-outline" size={18} color={theme.danger} />
             <ThemedText style={styles.noticeText}>{loadError}</ThemedText>
             <Pressable accessibilityRole="button" onPress={() => void refresh()} style={styles.retry}>
-              <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Retry</ThemedText>
+              <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>{t('common.tryAgain')}</ThemedText>
             </Pressable>
           </View>
         ) : null}
@@ -283,7 +289,7 @@ export default function TasksScreen() {
           <>
             {earlierOverdue.length ? (
               <View style={styles.section}>
-                <ThemedText style={[styles.sectionTitle, { color: theme.danger }]}>Overdue from earlier</ThemedText>
+                <ThemedText style={[styles.sectionTitle, { color: theme.danger }]}>{t('tasksTab.overdueEarlier')}</ThemedText>
                 {earlierOverdue.map((task) => (
                   <View key={task.id} style={{ gap: 4 }}>
                     <ThemedText themeColor="textSecondary" style={styles.fromDay}>{friendlyDay(task.dueDate!)}</ThemedText>
@@ -297,7 +303,7 @@ export default function TasksScreen() {
               <View style={styles.sectionHead}>
                 <ThemedText style={styles.sectionTitle}>{friendlyDay(selected)}</ThemedText>
                 {dayTasks.length ? (
-                  <ThemedText themeColor="textSecondary" style={styles.sectionCount}>{selectedDone}/{dayTasks.length} done</ThemedText>
+                  <ThemedText themeColor="textSecondary" style={styles.sectionCount}>{t('tasksTab.dayDone', { done: selectedDone, total: dayTasks.length })}</ThemedText>
                 ) : null}
               </View>
               {dayTasks.map((task) => <TaskRow key={task.id} task={task} onToggle={onToggle} />)}
@@ -308,10 +314,10 @@ export default function TasksScreen() {
               <View style={[styles.empty, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 <Ionicons name="sunny-outline" size={36} color={theme.primary} />
                 <ThemedText style={styles.emptyTitle}>
-                  {selected === today ? 'No tasks for today' : `Nothing planned for ${friendlyDay(selected).toLowerCase()}`}
+                  {selected === today ? t('tasksTab.noTasksToday') : t('tasksTab.nothingPlanned', { day: friendlyDay(selected) })}
                 </ThemedText>
                 <ThemedText themeColor="textSecondary" style={styles.emptyText}>
-                  Add one, or ask ORDINA AI to plan your day.
+                  {t('tasksTab.emptyHint')}
                 </ThemedText>
                 <View style={styles.emptyActions}>
                   <Pressable
@@ -319,14 +325,14 @@ export default function TasksScreen() {
                     onPress={() => router.push({ pathname: '/new-task', params: { date: selected } })}
                     style={[styles.emptyButton, { backgroundColor: theme.primary }]}>
                     <Ionicons name="add" size={18} color="#FFFFFF" />
-                    <ThemedText style={[styles.emptyButtonText, { color: '#FFFFFF' }]}>Add a task</ThemedText>
+                    <ThemedText style={[styles.emptyButtonText, { color: '#FFFFFF' }]}>{t('tasksTab.addTask')}</ThemedText>
                   </Pressable>
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => router.push('/ai')}
                     style={[styles.emptyButton, { backgroundColor: theme.backgroundSelected }]}>
                     <OrdinaMark size={24} />
-                    <ThemedText style={[styles.emptyButtonText, { color: theme.primary }]}>Ask ORDINA AI</ThemedText>
+                    <ThemedText style={[styles.emptyButtonText, { color: theme.primary }]}>{t('tasksTab.askAi')}</ThemedText>
                   </Pressable>
                 </View>
               </View>
@@ -337,7 +343,7 @@ export default function TasksScreen() {
 
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`Add a task for ${friendlyDay(selected)}`}
+        accessibilityLabel={t('tasksTab.addTaskFor', { day: friendlyDay(selected) })}
         onPress={() => router.push({ pathname: '/new-task', params: { date: selected } })}
         style={[styles.fab, { backgroundColor: theme.primary }]}>
         <Ionicons name="add" size={28} color="#FFFFFF" />
