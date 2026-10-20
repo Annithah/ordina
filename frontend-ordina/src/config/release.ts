@@ -16,12 +16,14 @@ export const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
 export const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
 
 export const FEATURES = {
-  /** Google / Apple sign-in buttons (email accounts are always available). */
-  socialSignIn: !STORE_BUILD,
+  /** Google / Apple sign-in buttons (each explains itself when it can't be used on this phone). */
+  socialSignIn: true,
   /** Integrations screen: Google Calendar, contacts, location, notifications. */
   integrations: !STORE_BUILD,
-  /** Local reminders and task notifications. */
-  reminders: !STORE_BUILD,
+  /** Server reminders screen (needs the ORDINA server). */
+  reminders: !STORE_BUILD && !LOCAL_MODE,
+  /** Task reminders scheduled on the phone itself; work offline. */
+  taskReminders: true,
   /** Linking phone contacts to tasks ("Call John"). */
   contacts: !STORE_BUILD,
   /** "Remind me when I arrive" (location). */
@@ -30,8 +32,10 @@ export const FEATURES = {
   mediaToTasks: !STORE_BUILD,
   /** Busy times / events from Google Calendar. */
   googleCalendar: !STORE_BUILD,
-  /** Email accounts, sign-in and server-side task storage. */
-  accounts: !LOCAL_MODE,
+  /** Accounts (name, email, 4-digit passkey). In offline mode they live on the phone. */
+  accounts: true,
+  /** Accounts stored on the ORDINA server (delete account online etc.). */
+  serverAccounts: !LOCAL_MODE,
   /** Goals, server reminders, notifications inbox and projects (server data). */
   serverWorkspace: !LOCAL_MODE,
   /** Repeating tasks (expanded by the server). */

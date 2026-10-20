@@ -370,7 +370,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     if (savedTaskId) {
       // The task is saved. Local notifications are best-effort and must never hold up saving.
       const id = savedTaskId;
-      const reminder = FEATURES.reminders && reminderLead !== null
+      const reminder = FEATURES.taskReminders && reminderLead !== null
         ? (() => {
           const start = dateFromKey(dueDate, startTime || '09:00');
           const when = new Date(start.getTime() - reminderLead * 60_000);
@@ -677,7 +677,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             </View>
           </Section>
 
-          {FEATURES.reminders ? <Section icon="notifications-outline" title="Reminder">
+          {FEATURES.taskReminders ? <Section icon="notifications-outline" title="Reminder">
             <View style={styles.wrap}>
               {REMINDERS.map((item) => (
                 <Chip key={item.label} label={item.label} active={reminderLead === item.minutes} onPress={() => setReminderLead(item.minutes)} />

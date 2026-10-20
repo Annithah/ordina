@@ -35,12 +35,19 @@ type PreferencesState = {
   answers: OnboardingAnswers;
   load: () => Promise<void>;
   saveAnswers: (answers: OnboardingAnswers) => Promise<void>;
+  /** Settings > My categories: changes only the "What would you like help with?" answer. */
+  setFocus: (focus: string[]) => Promise<void>;
 };
 
-export const usePreferencesStore = create<PreferencesState>((set) => ({
+export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   answers: {},
   load: async () => set({ answers: await read() }),
   saveAnswers: async (answers) => {
+    set({ answers });
+    await write(answers);
+  },
+  setFocus: async (focus) => {
+    const answers = { ...get().answers, focus };
     set({ answers });
     await write(answers);
   },
