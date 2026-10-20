@@ -145,7 +145,6 @@ test('createPlan validates, keeps approved tasks and returns a plan id', async (
     existingTasks: [],
     profile: null,
     generate,
-    now: new Date('2026-10-15T08:00:00Z'),
   });
   assert.match(plan.planId, /^[0-9a-f-]{36}$/);
   assert.equal(plan.tasks.length, 2);

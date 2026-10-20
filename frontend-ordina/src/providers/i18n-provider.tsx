@@ -1,29 +1,28 @@
-/**
- * The app's language. First launch: the phone's language if ORDINA supports it, else English.
- * The choice is saved on the phone, and changing it re-renders the whole app at once.
- */
-import { getLocales } from 'expo-localization';
 import * as SecureStore from 'expo-secure-store';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Platform } from 'react-native';
 
 import {
   DEFAULT_LOCALE,
   LANGUAGE_KEY,
-  isLocale,
-  pickLocale,
-  setCurrentLocale,
-  translateIn,
+  interpolate,
+  translations,
   type LocaleId,
-  type Translate,
-} from '@/i18n';
+  type TranslationTree,
+} from '@/i18n/translations';
 
 type I18nValue = {
   locale: LocaleId;
-  /** False until the saved (or phone) language is known, so nothing flashes in English first. */
-  ready: boolean;
   setLocale: (locale: LocaleId) => void;
-  t: Translate;
+  t: (path: string, vars?: Record<string, string | number>) => string;
 };
 
 const I18nContext = createContext<I18nValue | null>(null);
@@ -34,8 +33,8 @@ async function readLocale(): Promise<LocaleId | null> {
       Platform.OS === 'web' && typeof localStorage !== 'undefined'
         ? localStorage.getItem(LANGUAGE_KEY)
         : await SecureStore.getItemAsync(LANGUAGE_KEY);
-    // Older builds offered more languages; anything unsupported falls back to the phone language.
-    return isLocale(value) ? value : null;
+    if (value && value in translations) return value as LocaleId;
+    return null;
   } catch {
     return null;
   }
@@ -49,57 +48,58 @@ async function writeLocale(locale: LocaleId) {
     }
     await SecureStore.setItemAsync(LANGUAGE_KEY, locale);
   } catch {
-    // Not saved: the choice still applies until the app closes.
+    // ignore
   }
 }
 
-function phoneLocale(): LocaleId {
-  try {
-    return pickLocale(getLocales().map((item) => item.languageTag ?? item.languageCode));
-  } catch {
-    return DEFAULT_LOCALE;
+function lookup(tree: TranslationTree, path: string): string | undefined {
+  const parts = path.split('.');
+  let current: unknown = tree;
+  for (const part of parts) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
   }
+  return typeof current === 'string' ? current : undefined;
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [locale, setLocaleState] = useState<LocaleId>(() => {
-    const initial = phoneLocale();
-    setCurrentLocale(initial);
-    return initial;
-  });
-  const [ready, setReady] = useState(false);
+  const [locale, setLocaleState] = useState<LocaleId>(DEFAULT_LOCALE);
 
   useEffect(() => {
     void readLocale().then((stored) => {
-      if (stored) {
-        setCurrentLocale(stored);
-        setLocaleState(stored);
-      }
-      setReady(true);
+      if (stored) setLocaleState(stored);
     });
   }, []);
 
   const setLocale = useCallback((next: LocaleId) => {
-    setCurrentLocale(next);
     setLocaleState(next);
     void writeLocale(next);
   }, []);
 
-  const t = useCallback<Translate>((key, vars) => translateIn(locale, key, vars), [locale]);
+  const t = useCallback(
+    (path: string, vars?: Record<string, string | number>) => {
+      const value =
+        lookup(translations[locale], path) ?? lookup(translations.en, path) ?? path;
+      return vars ? interpolate(value, vars) : value;
+    },
+    [locale]
+  );
 
-  const value = useMemo(() => ({ locale, ready, setLocale, t }), [locale, ready, setLocale, t]);
+  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
-export function useI18n(): I18nValue {
+export function useI18n() {
   const context = useContext(I18nContext);
   if (!context) {
     return {
       locale: DEFAULT_LOCALE,
-      ready: true,
       setLocale: () => {},
-      t: (key, vars) => translateIn(DEFAULT_LOCALE, key, vars),
+      t: (path: string, vars?: Record<string, string | number>) => {
+        const value = lookup(translations.en, path) ?? path;
+        return vars ? interpolate(value, vars) : value;
+      },
     };
   }
   return context;

@@ -1,139 +1,143 @@
-/**
- * Local notifications (expo-notifications): they are scheduled on the phone, so they work
- * offline. Scheduling never asks for permission by itself; the app asks once, with an
- * explanation, when the user first turns a reminder on (requestNotificationPermission).
- */
-import Constants from 'expo-constants';
 import { Alert, Platform } from 'react-native';
+import Constants from 'expo-constants';
+import * as SecureStore from 'expo-secure-store';
 
-import { translate } from '@/i18n';
+let asked = false;
+let handlerConfigured = false;
+const SCHEDULED_REMINDERS_KEY = 'ordina.scheduledReminderIds.v1';
 
 type NotificationsModule = typeof import('expo-notifications');
-export type PermissionResult = 'granted' | 'denied' | 'undetermined' | 'unavailable';
 
-const CHANNEL_ID = 'ordina-reminders';
-let handlerConfigured = false;
-let channelReady = false;
-
-/** null where local notifications cannot work (web, Android Expo Go). */
-export async function loadNotifications(): Promise<NotificationsModule | null> {
-  if (Platform.OS === 'web') return null;
+async function loadNotifications(): Promise<NotificationsModule | null> {
+  // Notifications are deferred until the native development build is ready.
   if (Platform.OS === 'android' && Constants.appOwnership === 'expo') return null;
-  try {
-    const notifications = await import('expo-notifications');
-    if (!handlerConfigured) {
-      notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldPlaySound: true,
-          shouldSetBadge: false,
-          shouldShowBanner: true,
-          shouldShowList: true,
-        }),
-      });
-      handlerConfigured = true;
-    }
-    return notifications;
-  } catch {
-    return null;
+  const notifications = await import('expo-notifications');
+  if (!handlerConfigured) {
+    notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+    handlerConfigured = true;
   }
+  return notifications;
 }
 
-async function ensureChannel(Notifications: NotificationsModule) {
-  if (Platform.OS !== 'android' || channelReady) return;
-  await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
-    name: translate('reminders.channel'),
-    importance: Notifications.AndroidImportance.HIGH,
-  });
-  channelReady = true;
+async function readScheduledReminderIds(): Promise<Record<string, string>> {
+  const value = Platform.OS === 'web'
+    ? (typeof localStorage === 'undefined' ? null : localStorage.getItem(SCHEDULED_REMINDERS_KEY))
+    : await SecureStore.getItemAsync(SCHEDULED_REMINDERS_KEY);
+  return value ? JSON.parse(value) as Record<string, string> : {};
 }
 
-export async function getNotificationPermission(): Promise<PermissionResult> {
+async function writeScheduledReminderIds(value: Record<string, string>) {
+  const serialized = JSON.stringify(value);
+  if (Platform.OS === 'web') {
+    if (typeof localStorage === 'undefined') throw new Error('Browser storage is unavailable.');
+    localStorage.setItem(SCHEDULED_REMINDERS_KEY, serialized);
+    return;
+  }
+  await SecureStore.setItemAsync(SCHEDULED_REMINDERS_KEY, serialized);
+}
+
+export async function getNotificationPermission() {
   const Notifications = await loadNotifications();
   if (!Notifications) return 'unavailable';
-  try {
-    const current = await Notifications.getPermissionsAsync();
-    if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) return 'granted';
-    return current.status === 'denied' ? 'denied' : 'undetermined';
-  } catch {
-    return 'unavailable';
+  const current = await Notifications.getPermissionsAsync();
+  if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+    return 'granted';
   }
+  return current.status;
 }
 
-/** Shows the system permission prompt if it may still be shown. */
-export async function requestNotificationPermission(): Promise<PermissionResult> {
+export async function ensureNotificationPermission() {
   const Notifications = await loadNotifications();
   if (!Notifications) return 'unavailable';
-  try {
-    const current = await getNotificationPermission();
-    if (current === 'granted') return 'granted';
-    const next = await Notifications.requestPermissionsAsync();
-    if (next.granted) return 'granted';
-    return next.status === 'denied' || !next.canAskAgain ? 'denied' : 'undetermined';
-  } catch {
-    return 'unavailable';
+  const current = await Notifications.getPermissionsAsync();
+  if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
+    return 'granted';
   }
+  if (current.status === 'denied') return 'denied';
+  if (asked) return current.status;
+  asked = true;
+  const next = await Notifications.requestPermissionsAsync();
+  return next.granted ? 'granted' : next.status;
 }
-
-/** Kept for the older integrations screen. */
-export const ensureNotificationPermission = requestNotificationPermission;
-
-/**
- * Schedules (or replaces) the notification with this identifier. Returns false when it was not
- * scheduled: no permission, unavailable, or a time in the past.
- */
-export async function scheduleAt(identifier: string, when: Date, content: { title: string; body: string; data?: Record<string, string> }) {
-  const Notifications = await loadNotifications();
-  if (!Notifications || when.getTime() <= Date.now()) return false;
-  if ((await getNotificationPermission()) !== 'granted') return false;
-  await ensureChannel(Notifications);
-  await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => undefined);
-  await Notifications.scheduleNotificationAsync({
-    identifier,
-    content: { title: content.title, body: content.body, data: content.data ?? {} },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when, channelId: CHANNEL_ID },
-  });
-  return true;
-}
-
-export async function cancelScheduled(identifier: string) {
-  const Notifications = await loadNotifications();
-  if (!Notifications) return;
-  await Notifications.cancelScheduledNotificationAsync(identifier).catch(() => undefined);
-}
-
-/** Identifiers of scheduled notifications that start with `prefix`. */
-export async function scheduledIds(prefix: string) {
-  const Notifications = await loadNotifications();
-  if (!Notifications) return [];
-  try {
-    return (await Notifications.getAllScheduledNotificationsAsync()).map((item) => item.identifier).filter((id) => id.startsWith(prefix));
-  } catch {
-    return [];
-  }
-}
-
-// ---------------------------------------------------------------- older screens (not in this build)
 
 export async function scheduleLocalReminder(title: string, body: string, when: Date, data?: Record<string, string>) {
-  const identifier = `misc-${when.getTime()}-${Math.random().toString(36).slice(2, 8)}`;
-  return (await scheduleAt(identifier, when, { title, body, data })) ? identifier : null;
+  const Notifications = await loadNotifications();
+  if (!Notifications) return null;
+  const permission = await ensureNotificationPermission();
+  if (permission !== 'granted') return null;
+  if (when.getTime() <= Date.now()) return null;
+  if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('ordina-reminders', {
+      name: 'ORDINA reminders',
+      importance: Notifications.AndroidImportance.HIGH,
+    });
+  }
+  return Notifications.scheduleNotificationAsync({
+    content: { title, body, data },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: when },
+  });
 }
 
 export async function cancelTaskReminder(taskId: string) {
-  await cancelScheduled(`task-${taskId}`);
+  const ids = await readScheduledReminderIds();
+  const identifier = ids[taskId];
+  if (!identifier) return;
+  const Notifications = await loadNotifications();
+  if (Notifications) await Notifications.cancelScheduledNotificationAsync(identifier);
+  delete ids[taskId];
+  await writeScheduledReminderIds(ids);
 }
 
-export async function scheduleTaskReminder(taskId: string, title: string, when: Date, data?: Record<string, string>) {
+export async function scheduleTaskReminder(
+  taskId: string,
+  title: string,
+  when: Date,
+  data?: Record<string, string>,
+) {
+  await cancelTaskReminder(taskId);
   const { body, ...rest } = data ?? {};
-  const identifier = `task-${taskId}`;
-  return (await scheduleAt(identifier, when, { title, body: body || title, data: { ...rest, type: 'task', taskId } })) ? identifier : null;
+  const identifier = await scheduleLocalReminder(title, body || 'Task reminder', when, {
+    ...rest,
+    type: 'task',
+    taskId,
+  });
+  if (!identifier) return null;
+  try {
+    const ids = await readScheduledReminderIds();
+    ids[taskId] = identifier;
+    await writeScheduledReminderIds(ids);
+  } catch (error) {
+    const Notifications = await loadNotifications();
+    if (Notifications) await Notifications.cancelScheduledNotificationAsync(identifier);
+    throw error;
+  }
+  return identifier;
 }
 
 export async function presentImmediateNotification(title: string, body: string) {
   const Notifications = await loadNotifications();
-  if (Notifications && (await getNotificationPermission()) === 'granted') {
-    await ensureChannel(Notifications);
-    return Notifications.scheduleNotificationAsync({ content: { title, body }, trigger: null });
+  if (Notifications) {
+    const permission = await ensureNotificationPermission();
+    if (permission === 'granted') {
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('ordina-reminders', {
+          name: 'ORDINA reminders',
+          importance: Notifications.AndroidImportance.HIGH,
+        });
+      }
+      return Notifications.scheduleNotificationAsync({
+        content: { title, body },
+        trigger: null,
+      });
+    }
   }
   Alert.alert(title, body);
   return null;

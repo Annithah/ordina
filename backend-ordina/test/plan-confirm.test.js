@@ -1,11 +1,21 @@
-// Duplicate prevention and offline learning, against a throwaway PostgreSQL schema (TEST_DATABASE_URL).
+// Duplicate prevention and offline learning, against a real temporary SQLite database.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
-const db = require('./db-helper');
-
-const skip = db.skip;
-const prisma = db.setup();
+const dbFile = path.join(os.tmpdir(), `ordina-plan-test-${process.pid}.sqlite`);
+process.env.DATABASE_URL = `file:${dbFile.replace(/\\/g, '/')}`;
+const backendRoot = path.resolve(__dirname, '..');
+execFileSync(process.execPath, [path.join(backendRoot, 'node_modules/prisma/build/index.js'), 'migrate', 'deploy'], {
+  cwd: backendRoot,
+  env: { ...process.env },
+  stdio: 'ignore',
+});
+const skip = false;
+const prisma = require('../src/lib/prisma');
 const { confirmPlan, learnFromPlan } = require('../src/lib/plan-service');
 
 const helpers = {
@@ -43,13 +53,13 @@ const plan = [
 let userId;
 
 test.before(async () => {
-  if (skip) return;
   const user = await prisma.user.create({ data: { email: 'plan@test.local', passwordHash: 'x', displayName: 'Plan Tester' } });
   userId = user.id;
 });
 
 test.after(async () => {
-  await db.teardown();
+  await prisma.$disconnect();
+  for (const suffix of ['', '-shm', '-wal', '-journal']) fs.rmSync(`${dbFile}${suffix}`, { force: true });
 });
 
 test('confirming the same plan twice creates the tasks once', { skip }, async () => {

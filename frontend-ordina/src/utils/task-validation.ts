@@ -1,6 +1,4 @@
-/** Client-side task checks (same limits as utils/task-rules.ts), with translated messages. */
-import { translate } from '@/i18n';
-import { DURATION_MAX, DURATION_MIN } from '@/logic/schedule';
+/** Client-side checks that mirror backend-ordina/src/lib/task-validation.js. */
 
 export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 2000;
@@ -23,37 +21,30 @@ export function validateTaskForm(input: {
   description?: string;
   dueDate?: string;
   startTime?: string;
-  durationMinutes?: number | null;
+  durationMinutes?: number;
 }): TaskFieldErrors {
   const errors: TaskFieldErrors = {};
   const title = input.title.trim();
-  if (!title) errors.title = translate('errors.titleRequired');
-  else if (title.length > TITLE_MAX) errors.title = translate('errors.titleTooLong', { max: TITLE_MAX });
+  if (!title) errors.title = 'Please add a task title.';
+  else if (title.length > TITLE_MAX) errors.title = `Keep the title under ${TITLE_MAX} characters.`;
   if ((input.description ?? '').trim().length > DESCRIPTION_MAX) {
-    errors.description = translate('errors.descriptionTooLong', { max: DESCRIPTION_MAX });
+    errors.description = `Keep the description under ${DESCRIPTION_MAX} characters.`;
   }
-  if (input.dueDate && !isValidDateKey(input.dueDate)) errors.dueDate = translate('errors.invalidDate');
-  if (input.startTime && !isValidTime(input.startTime)) errors.startTime = translate('errors.invalidTime');
-  if (input.durationMinutes != null && (input.durationMinutes < DURATION_MIN || input.durationMinutes > DURATION_MAX)) {
-    errors.duration = translate('errors.invalidDuration');
+  if (input.dueDate && !isValidDateKey(input.dueDate)) errors.dueDate = 'Please choose a valid date.';
+  if (input.startTime && !isValidTime(input.startTime)) errors.startTime = 'Please choose a valid time.';
+  if (input.durationMinutes !== undefined && (input.durationMinutes < 5 || input.durationMinutes > 24 * 60)) {
+    errors.duration = 'Duration must be between 5 minutes and 24 hours.';
   }
   return errors;
 }
 
-/**
- * Turns an error into a short, friendly sentence in the app's language (never a raw stack or
- * status code). Server messages are shown only when the server sent a translated `code`
- * this app knows; otherwise the translated fallback is used.
- */
+/** Turns an axios error into a short, friendly sentence (never a raw stack or status code). */
 export function friendlyError(error: unknown, fallback: string) {
-  const err = error as { response?: { status?: number; data?: { message?: string; code?: string } }; code?: string; message?: string };
-  if (err?.response?.status === 401) return translate('errors.sessionExpired');
-  const code = err?.response?.data?.code;
-  if (code) {
-    const known = translate(`serverErrors.${code}`);
-    if (known !== `serverErrors.${code}`) return known;
-  }
-  if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message ?? '')) return translate('errors.timeout');
-  if (/Network Error/i.test(err?.message ?? '') || (err && !err.response && err.message && /network|fetch/i.test(err.message))) return translate('errors.network');
-  return fallback;
+  const err = error as { response?: { status?: number; data?: { message?: string } }; code?: string; message?: string };
+  if (err?.response?.status === 401) return 'Your session has expired. Please sign in again.';
+  const serverMessage = err?.response?.data?.message;
+  if (serverMessage && err.response?.status && err.response.status < 500) return serverMessage;
+  if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message ?? '')) return 'The server took too long to answer. Please try again.';
+  if (/Network Error/i.test(err?.message ?? '')) return 'Cannot reach the ORDINA server. Check your connection and try again.';
+  return serverMessage || fallback;
 }

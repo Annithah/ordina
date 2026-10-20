@@ -1,26 +1,22 @@
 /**
- * ORDINA AI runs on the server. A signed-in user's requests use their account token (already on
- * the api client). Without an account, the phone identifies itself with a random device id
- * (kept in secure storage) and gets a token used only for AI requests, so learned planning
- * habits stay per phone. Tasks never leave the phone except as AI context.
+ * Offline mode (LOCAL_MODE): ORDINA AI runs on the developer's laptop. The phone has no account,
+ * so it identifies itself with a random device id (kept in secure storage) and gets a token that
+ * is used only for AI requests. Tasks never leave the phone except as AI context.
  */
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 
-import { translate } from '@/i18n';
-import { API_BASE_URL, COLD_START_MS, api } from '@/services/api';
+import { api } from '@/services/api';
 
 const DEVICE_ID_KEY = 'ordina.deviceId';
+export const LAPTOP_MESSAGE = 'ORDINA AI needs the laptop server right now.';
 
-export class ServerUnreachableError extends Error {
-  code = 'SERVER_UNREACHABLE';
+export class LaptopUnreachableError extends Error {
+  code = 'LAPTOP_UNREACHABLE';
   constructor() {
-    super(translate('ai.serverUnreachable'));
+    super(LAPTOP_MESSAGE);
   }
 }
-
-/** Kept for older imports. */
-export const LaptopUnreachableError = ServerUnreachableError;
 
 let token: string | null = null;
 
@@ -36,39 +32,35 @@ async function deviceId() {
   }
 }
 
-/** No response at all (server down, no route, timeout): the server is unreachable. */
+/** No response at all (laptop off, other Wi-Fi, firewall, timeout): the laptop is unreachable. */
 export function isUnreachable(error: unknown) {
   const err = error as { response?: unknown; code?: string };
   return !err?.response || err?.code === 'ECONNABORTED';
 }
 
-/** Reachability check. The free server can take about a minute to wake up, so allow that. */
-export async function ensureServer() {
-  if (!API_BASE_URL) throw new ServerUnreachableError();
+/** Quick reachability check so the user is not left waiting when the laptop is off. */
+export async function ensureLaptopServer() {
   try {
-    await api.get('/health', { timeout: 8000 + COLD_START_MS });
+    await api.get('/health', { timeout: 5000 });
   } catch {
-    throw new ServerUnreachableError();
+    throw new LaptopUnreachableError();
   }
 }
 
-const signedIn = () => Boolean(api.defaults.headers.common.Authorization);
-
 async function deviceToken(refresh = false) {
   if (token && !refresh) return token;
-  const { data } = await api.post('/api/device/session', { deviceId: await deviceId() }, { timeout: 15_000 + COLD_START_MS });
+  const { data } = await api.post('/api/device/session', { deviceId: await deviceId() }, { timeout: 10_000 });
   token = String(data.token);
   return token;
 }
 
 /**
- * Runs an AI request with the right token. An unreachable server becomes a
- * ServerUnreachableError; an expired device token is renewed once.
+ * Runs an AI request against the laptop with the device token. Unreachable laptop becomes a
+ * LaptopUnreachableError; an expired token is renewed once.
  */
-export async function withAiSession<T>(request: (headers: Record<string, string>) => Promise<T>): Promise<T> {
-  await ensureServer();
+export async function withLaptop<T>(request: (headers: Record<string, string>) => Promise<T>): Promise<T> {
+  await ensureLaptopServer();
   try {
-    if (signedIn()) return await request({});
     try {
       return await request({ Authorization: `Bearer ${await deviceToken()}` });
     } catch (error: any) {
@@ -76,10 +68,7 @@ export async function withAiSession<T>(request: (headers: Record<string, string>
       return await request({ Authorization: `Bearer ${await deviceToken(true)}` });
     }
   } catch (error) {
-    if (isUnreachable(error)) throw new ServerUnreachableError();
+    if (isUnreachable(error)) throw new LaptopUnreachableError();
     throw error;
   }
 }
-
-/** Kept for older imports. */
-export const withLaptop = withAiSession;

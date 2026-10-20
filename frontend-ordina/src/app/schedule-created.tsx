@@ -1,16 +1,12 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
-import { useCategories } from '@/hooks/use-categories';
 import { useTheme } from '@/hooks/use-theme';
-import { formatDay, formatDuration, formatTime } from '@/i18n/format';
-import { durationMinutes } from '@/logic/schedule';
-import { useI18n } from '@/providers/i18n-provider';
 import { useTasksStore } from '@/store/tasks-store';
 import { href } from '@/utils/href';
 
@@ -18,8 +14,6 @@ export default function ScheduleCreatedScreen() {
   const theme = useTheme();
   const params = useLocalSearchParams<{ taskIds?: string | string[] }>();
   const allTasks = useTasksStore((state) => state.tasks);
-  const { nameOf } = useCategories();
-  const { t, locale } = useI18n();
   const taskIds = Array.isArray(params.taskIds) ? params.taskIds : (params.taskIds || '').split(',');
   const tasks = useMemo(
     () => allTasks
@@ -30,6 +24,13 @@ export default function ScheduleCreatedScreen() {
       ),
     [allTasks, params.taskIds],
   );
+  const scheduleDate = tasks[0]?.dueDate
+    ? new Date(`${tasks[0].dueDate}T12:00:00`).toLocaleDateString(undefined, {
+      month: 'long',
+      day: 'numeric',
+    })
+    : null;
+
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -37,32 +38,44 @@ export default function ScheduleCreatedScreen() {
           <View style={[styles.check, { backgroundColor: theme.success }]}>
             <Ionicons name="checkmark" size={36} color="#FFFFFF" />
           </View>
-          <ThemedText style={styles.title} accessibilityRole="header">{t('schedule.created')}</ThemedText>
-          <ThemedText themeColor="textSecondary">{t('schedule.createdSub', { count: tasks.length })}</ThemedText>
+          <ThemedText style={styles.title}>Schedule Created</ThemedText>
+          <ThemedText themeColor="textSecondary">
+            {tasks.length
+              ? `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} saved${scheduleDate ? ` for ${scheduleDate}` : ''}`
+              : 'Your confirmed changes have been saved.'}
+          </ThemedText>
         </View>
+        <ThemedText themeColor="textSecondary" style={styles.group}>YOUR PLAN</ThemedText>
         {tasks.map((task) => (
           <View key={task.id} style={styles.row}>
             <View style={styles.when}>
-              <ThemedText style={styles.time}>{task.startTime ? formatTime(locale, task.startTime) : t('dates.anytime')}</ThemedText>
-              <ThemedText themeColor="textSecondary">{task.dueDate ? formatDay(locale, task.dueDate) : ''}</ThemedText>
+              <ThemedText style={styles.time}>{task.startTime || 'Any time'}</ThemedText>
+              <ThemedText themeColor="textSecondary">
+                {task.dueDate
+                  ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                  : ''}
+              </ThemedText>
             </View>
             <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: theme.primary }]}>
               <ThemedText style={styles.cardTitle}>{task.title}</ThemedText>
               <ThemedText themeColor="textSecondary">
-                {nameOf(task.categoryId)}
-                {task.duration ? ` · ${formatDuration(locale, durationMinutes(task.duration))}` : ''}
+                {task.category.charAt(0).toUpperCase() + task.category.slice(1)}
+                {task.duration ? ` · ${task.duration}` : ''}
               </ThemedText>
             </View>
           </View>
         ))}
         {tasks.length === 0 ? (
           <ThemedText themeColor="textSecondary" style={styles.empty}>
-            {t('schedule.empty')}
+            View your current tasks from the calendar or task list.
           </ThemedText>
         ) : null}
       </ScrollView>
       <View style={styles.footer}>
-        <PrimaryButton label={t('schedule.viewTasks')} onPress={() => router.replace(href('/(tabs)'))} />
+        <PrimaryButton label="View Calendar" onPress={() => router.replace(href('/calendar'))} />
+        <Pressable onPress={() => router.replace('/ai')} style={styles.changes}>
+          <ThemedText>Make Changes</ThemedText>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -73,10 +86,10 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1 },
   hero: { alignItems: 'center', paddingTop: 24, gap: 8, marginBottom: 24 },
   check: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center' },
-  title: { fontSize: 26, fontFamily: 'Poppins_700Bold', textAlign: 'center' },
+  title: { fontSize: 28, fontFamily: 'Poppins_700Bold' },
   group: { fontSize: 11, letterSpacing: 1.4, marginBottom: 12 },
   row: { flexDirection: 'row', gap: 12, marginBottom: 10 },
-  when: { width: 88 },
+  when: { width: 76 },
   time: { fontFamily: 'Poppins_600SemiBold' },
   card: { flex: 1, borderLeftWidth: 4, borderRadius: 12, padding: 12 },
   cardTitle: { fontFamily: 'Poppins_500Medium' },

@@ -6,8 +6,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma = require('./lib/prisma');
 const { signToken, requireUser } = require('./lib/auth');
-const { mailConfigured } = require('./lib/mail');
-const { accountRoutes } = require('./routes/account');
+const { sendMail } = require('./lib/mail');
+const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
 const ai = require('./lib/ai');
 const schedule = require('./lib/schedule');
 const taskValidation = require('./lib/task-validation');
@@ -32,8 +32,6 @@ app.use(cors({
 }));
 // Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
 app.use('/api/ai', express.json({ limit: '30mb' }));
-// A first sync from a phone with many tasks can be large.
-app.use('/api/sync', express.json({ limit: '25mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 // Method, path, status and timing only: no request bodies, so no task text or prompts in logs.
@@ -47,7 +45,7 @@ app.use(rateLimit({
 }));
 // Stricter limits where guessing or cost matters.
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { message: 'Too many attempts. Please wait a few minutes and try again.' } });
-app.use(['/account/delete', '/api/device/session'], authLimiter);
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete', '/api/device/session'], authLimiter);
 app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { message: 'You are sending requests very quickly. Please wait a moment.' } }));
 
 app.get('/health', async (_req, res) => {
@@ -65,15 +63,204 @@ app.get('/api/health', async (_req, res) => {
     res.json({
       ok: true,
       service: 'ordina-backend',
-      db: 'postgres',
+      db: 'sqlite',
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
-        email: mailConfigured(),
+        googleAuth: Boolean(
+          process.env.GOOGLE_CLIENT_ID
+            || process.env.GOOGLE_IOS_CLIENT_ID
+            || process.env.GOOGLE_ANDROID_CLIENT_ID
+            || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
+        ),
+        appleAuth: Boolean(process.env.APPLE_CLIENT_ID || process.env.APPLE_BUNDLE_ID),
+        smtp: Boolean(process.env.SMTP_HOST),
       },
     });
   } catch (error) {
     res.status(500).json({ ok: false, message: 'Database unavailable', error: isProduction ? undefined : error.message });
+  }
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body ?? {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Name, email and password are required.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (existing) {
+      return res.status(409).json({ message: 'Email already registered.' });
+    }
+
+    const passwordHash = require('argon2').hash(password);
+    const user = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        displayName: String(name).trim(),
+        passwordHash: await passwordHash,
+      },
+      select: {
+        id: true,
+        email: true,
+        displayName: true,
+      },
+    });
+
+    return res.status(201).json({
+      user: {
+        id: user.id,
+        name: user.displayName,
+        email: user.email,
+      },
+      token: signToken(user),
+    });
+  } catch (error) {
+    console.error('Register error:', error.code || error.message);
+    if (error.code === 'P2002') {
+      return res.status(409).json({ message: 'Email already registered.' });
+    }
+    return res.status(500).json({ message: 'Unable to register user.', error: error.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body ?? {};
+
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required.' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    const valid = await require('argon2').verify(user.passwordHash, String(password));
+    if (!valid) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    return res.json({
+      user: {
+        id: user.id,
+        name: user.displayName,
+        email: user.email,
+      },
+      token: signToken(user),
+    });
+  } catch (error) {
+    console.error('Login error:', error.code || error.message);
+    return res.status(500).json({ message: 'Unable to sign in.', error: error.message });
+  }
+});
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const idToken = String(req.body?.idToken || req.body?.id_token || '').trim();
+    if (!idToken) return res.status(400).json({ message: 'Google idToken is required.' });
+    const identity = await verifyGoogleIdToken(idToken);
+    return res.json(await upsertOAuthUser(identity));
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Google sign-in failed.' });
+  }
+});
+
+app.post('/api/auth/apple', async (req, res) => {
+  try {
+    const identityToken = String(req.body?.identityToken || req.body?.idToken || '').trim();
+    if (!identityToken) return res.status(400).json({ message: 'Apple identityToken is required.' });
+    const identity = await verifyAppleIdentityToken(identityToken);
+    if (req.body?.fullName) {
+      const parts = [req.body.fullName.givenName, req.body.fullName.familyName].filter(Boolean);
+      if (parts.length) identity.name = parts.join(' ');
+    }
+    return res.json(await upsertOAuthUser(identity));
+  } catch (error) {
+    return res.status(error.status || 500).json({ message: error.message || 'Apple sign-in failed.' });
+  }
+});
+
+app.post('/api/auth/forgot', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ message: 'Email is required.' });
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      if (isProduction && !process.env.SMTP_HOST) {
+        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
+      }
+      return res.json({ emailed: Boolean(process.env.SMTP_HOST), message: 'If that account exists, a reset code was issued.' });
+    }
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    await prisma.passwordReset.updateMany({ where: { userId: user.id, used: false }, data: { used: true } });
+    await prisma.passwordReset.create({
+      data: {
+        userId: user.id,
+        codeHash: await require('argon2').hash(code),
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+      },
+    });
+    const mailed = await sendMail({
+      to: email,
+      subject: 'ORDINA password reset code',
+      text: `Your ORDINA reset code is ${code}. It expires in 15 minutes.`,
+    });
+    if (!mailed.sent) {
+      // Returning the code is only acceptable on a developer's machine: in production it would
+      // let anyone reset any account by knowing its email address.
+      if (isProduction) {
+        await prisma.passwordReset.updateMany({ where: { userId: user.id, used: false }, data: { used: true } });
+        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
+      }
+      return res.json({
+        emailed: false,
+        code,
+        message: 'Email delivery is not configured (SMTP_HOST missing). Use this 6-digit code now to set a new password.',
+      });
+    }
+    return res.json({ emailed: true, message: 'A reset code was sent to your email.' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to start password reset.', error: error.message });
+  }
+});
+
+app.post('/api/auth/reset', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const code = String(req.body?.code || '').trim();
+    const newPassword = String(req.body?.newPassword || req.body?.password || '');
+    if (!email || !code || newPassword.length < 8) {
+      return res.status(400).json({ message: 'Email, 6-digit code, and a new password (8+ characters) are required.' });
+    }
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) return res.status(400).json({ message: 'Invalid reset code.' });
+    const resets = await prisma.passwordReset.findMany({
+      where: { userId: user.id, used: false, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+    });
+    let matched = null;
+    for (const reset of resets) {
+      if (await require('argon2').verify(reset.codeHash, code)) {
+        matched = reset;
+        break;
+      }
+    }
+    if (!matched) return res.status(400).json({ message: 'Invalid or expired reset code.' });
+    await prisma.passwordReset.update({ where: { id: matched.id }, data: { used: true } });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await require('argon2').hash(newPassword) },
+    });
+    return res.json({ ok: true, message: 'Password updated. You can sign in with the new password.' });
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to reset password.', error: error.message });
   }
 });
 
@@ -90,8 +277,6 @@ async function deleteAccountData(userId) {
       prisma.aiMessage.deleteMany({ where: { userId } }),
       prisma.passwordReset.deleteMany({ where: { userId } }),
       prisma.place.deleteMany({ where: { userId } }),
-      prisma.syncItem.deleteMany({ where: { userId } }),
-      prisma.refreshToken.deleteMany({ where: { userId } }),
       prisma.task.updateMany({ where: { userId }, data: { parentTaskId: null } }),
       prisma.task.deleteMany({ where: { userId } }),
       prisma.goal.deleteMany({ where: { userId } }),
@@ -100,6 +285,17 @@ async function deleteAccountData(userId) {
       prisma.user.delete({ where: { id: userId } }),
     ]);
 }
+
+app.delete('/api/auth/account', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    await deleteAccountData(userId);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
+  }
+});
 
 /**
  * Offline (development) mode: the phone keeps tasks on the device and has no email account.
@@ -131,8 +327,6 @@ app.post('/api/device/session', async (req, res) => {
     return res.status(500).json({ message: 'Could not start an ORDINA AI session.' });
   }
 });
-
-app.use(accountRoutes(prisma, { isProduction, deleteAccountData }));
 
 /** Public account-deletion page (Google Play requires a web link as well as in-app deletion). */
 function deletionPage(body) {
@@ -1160,6 +1354,4 @@ async function start() {
   });
 }
 
-if (require.main === module) start();
-
-module.exports = { app, deleteAccountData };
+start();
