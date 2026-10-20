@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
@@ -173,6 +174,8 @@ export default function OnboardingScreen() {
               {t('onboarding.haveAccount')}
             </ThemedText>
           </Pressable>
+          {/* Shows which version is installed, so testers can tell an old copy from a new one. */}
+          <ThemedText themeColor="textSecondary" style={styles.version}>v{Constants.expoConfig?.version}</ThemedText>
         </View>
       </SafeAreaView>
     );
@@ -302,6 +305,7 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 20 },
+  version: { fontSize: 11, textAlign: 'center' },
   languageCorner: { position: 'absolute', left: 20, zIndex: 2 },
   welcomeCopy: { flex: 1, justifyContent: 'flex-end', paddingBottom: 28, gap: 8 },
   headline: { fontSize: 32, lineHeight: 40, fontFamily: 'Poppins_700Bold' },
