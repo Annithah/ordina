@@ -131,12 +131,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hydrate: async () => {
     const onboarding = await read(KEYS.onboarding);
     const sessionId = await read(KEYS.session);
-    const account = sessionId ? (await readAccounts()).find((item) => item.id === sessionId) : undefined;
+    const accounts = await readAccounts();
+    const account = sessionId ? accounts.find((item) => item.id === sessionId) : undefined;
     // Sessions from older versions (server tokens) are not accounts on this phone: sign in again.
     if (sessionId && !account) await write(KEYS.session, null);
     set({
       hydrated: true,
-      hasSeenOnboarding: onboarding === '1',
+      // No account on this phone yet (new install, or updated from version 1): start from the
+      // welcome screen, so the language button and intro questions are always seen first.
+      hasSeenOnboarding: onboarding === '1' && accounts.length > 0,
       isSignedIn: Boolean(account),
       user: account ? publicUser(account) : null,
     });
