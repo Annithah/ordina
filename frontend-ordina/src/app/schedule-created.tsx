@@ -7,11 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { useTasksStore } from '@/store/tasks-store';
 import { href } from '@/utils/href';
 
 export default function ScheduleCreatedScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ taskIds?: string | string[] }>();
   const allTasks = useTasksStore((state) => state.tasks);
   const taskIds = Array.isArray(params.taskIds) ? params.taskIds : (params.taskIds || '').split(',');
@@ -59,7 +61,7 @@ export default function ScheduleCreatedScreen() {
             <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: theme.primary }]}>
               <ThemedText style={styles.cardTitle}>{task.title}</ThemedText>
               <ThemedText themeColor="textSecondary">
-                {task.category.charAt(0).toUpperCase() + task.category.slice(1)}
+                {t(`categories.items.${task.category}`)}
                 {task.duration ? ` · ${task.duration}` : ''}
               </ThemedText>
             </View>

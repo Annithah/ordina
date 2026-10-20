@@ -6,6 +6,7 @@
 import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
 
+import { normalizeCategory } from '@/features/categories';
 import type { Task } from '@/store/tasks-store';
 import { firstRuleError, validateTaskInput, type TaskRuleErrors } from '@/utils/task-rules';
 
@@ -83,7 +84,7 @@ function toTask(row: Row): Task {
     description: row.description ?? '',
     status,
     priority: (row.priority as Task['priority']) || 'medium',
-    category: (row.category as Task['category']) || 'personal',
+    category: normalizeCategory(row.category),
     dueDate: row.due_date ?? undefined,
     startTime: row.start_time ?? undefined,
     duration: row.duration ?? undefined,

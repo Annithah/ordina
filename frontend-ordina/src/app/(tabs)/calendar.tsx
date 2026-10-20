@@ -10,6 +10,7 @@ import { Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { categoryInfo } from '@/features/categories';
 import { useTheme } from '@/hooks/use-theme';
 import { useTasksStore, type Task } from '@/store/tasks-store';
 import { localDateKey } from '@/utils/dates';
@@ -32,15 +33,7 @@ function formatHour(h: number): string {
 }
 
 function getCategoryColor(category: string): string {
-  const map: Record<string, string> = {
-    work: '#5C4DF2',
-    health: '#22C55E',
-    learning: '#7C3AED',
-    personal: '#F59E0B',
-    design: '#EC4899',
-    database: '#06B6D4',
-  };
-  return map[category] ?? '#64748B';
+  return categoryInfo(category).color;
 }
 
 function getWeekDays(baseDate: Date): Date[] {
