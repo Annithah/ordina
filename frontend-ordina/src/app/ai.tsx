@@ -315,7 +315,7 @@ export default function OrdinaAiScreen() {
       // Reminders are best-effort and run in the background: a pending permission
       // prompt must never keep the plan stuck on "Saving...".
       for (const task of [...(saved.created ?? []), ...(saved.rescheduled ?? [])]) {
-        if (!FEATURES.reminders || !task.reminder || !task.dueDate) continue;
+        if (!FEATURES.taskReminders || !task.reminder || !task.dueDate) continue;
         const start = new Date(`${task.dueDate}T${task.startTime || '09:00'}:00`);
         const when = task.startTime ? new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60_000) : start;
         void scheduleTaskReminder(String(task.id), task.title, when.getTime() > Date.now() ? when : start, {

@@ -16,6 +16,7 @@ import { I18nProvider } from '@/providers/i18n-provider';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
 import { useLockStore } from '@/store/lock-store';
+import { usePreferencesStore } from '@/store/preferences-store';
 import { FEATURES } from '@/config/release';
 
 function RootStack() {
@@ -63,6 +64,7 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 export default function RootLayout() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const hydrateLock = useLockStore((s) => s.hydrate);
+  const loadPreferences = usePreferencesStore((s) => s.load);
   const [fontsLoaded, fontError] = useFonts({
     Poppins_400Regular,
     Poppins_500Medium,
@@ -73,7 +75,8 @@ export default function RootLayout() {
   useEffect(() => {
     void hydrate();
     void hydrateLock();
-  }, [hydrate, hydrateLock]);
+    void loadPreferences();
+  }, [hydrate, hydrateLock, loadPreferences]);
 
   // If the fonts can't load, continue with the system font instead of a blank screen.
   if (!fontsLoaded && !fontError) {

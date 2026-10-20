@@ -2,9 +2,9 @@
  * Expo config. app.json holds the base settings; this file adjusts them for the
  * Google Play build (EAS profiles "production" and "preview" set EXPO_PUBLIC_STORE_BUILD=1).
  *
- * The store build ships only Daily Task Planning + ORDINA AI (with optional voice), so it
- * drops the native plugins and Android permissions of features that are switched off in
- * src/config/release.ts. Only the microphone remains, requested when the mic is first used.
+ * The store build ships Daily Task Planning, task reminders and ORDINA AI (with optional voice),
+ * so it drops the native plugins and Android permissions of features that are switched off in
+ * src/config/release.ts. Microphone and notifications are asked for when first used.
  */
 
 const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
@@ -26,7 +26,6 @@ const STORE_EXCLUDED_PLUGINS = new Set([
   'expo-contacts',
   'expo-location',
   'expo-image-picker',
-  'expo-notifications',
   'expo-apple-authentication',
 ]);
 
@@ -38,10 +37,9 @@ const STORE_BLOCKED_PERMISSIONS = [
   'android.permission.ACCESS_COARSE_LOCATION',
   'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.ACCESS_BACKGROUND_LOCATION',
-  'android.permission.POST_NOTIFICATIONS',
+  // Task reminders use normal (inexact) scheduled notifications, so exact alarms stay blocked.
   'android.permission.SCHEDULE_EXACT_ALARM',
   'android.permission.USE_EXACT_ALARM',
-  'android.permission.RECEIVE_BOOT_COMPLETED',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
   'android.permission.READ_MEDIA_IMAGES',
@@ -88,7 +86,7 @@ module.exports = ({ config }) => {
     plugins: (config.plugins ?? []).filter((plugin) => !STORE_EXCLUDED_PLUGINS.has(pluginName(plugin))),
     android: {
       ...config.android,
-      permissions: ['android.permission.RECORD_AUDIO'],
+      permissions: ['android.permission.RECORD_AUDIO', 'android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED'],
       blockedPermissions: [...blocked],
     },
   };
