@@ -38,6 +38,7 @@ function RootStack() {
         <Stack.Screen name="create-pin" />
         <Stack.Screen name="lock" />
         <Stack.Screen name="language" />
+        <Stack.Screen name="categories" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="ai" options={{ animation: 'slide_from_bottom' }} />
