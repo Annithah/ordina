@@ -2,111 +2,112 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LanguageButton } from '@/components/language-picker';
 import { OnboardingArt } from '@/components/onboarding-art';
 import { PrimaryButton } from '@/components/primary-button';
 import { SocialAuthButtons } from '@/components/social-auth-buttons';
 import { ThemedText } from '@/components/themed-text';
+import { focusGroups } from '@/features/categories';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
 import { usePreferencesStore, type OnboardingAnswers } from '@/store/preferences-store';
 import { href } from '@/utils/href';
-import { FEATURES, LOCAL_MODE } from '@/config/release';
-import { routeAfterAuth } from '@/utils/after-auth';
 
 type IconName = keyof typeof Ionicons.glyphMap;
-type Option = { id: string; label: string; icon: IconName };
-type Question = { id: string; title: string; subtitle: string; multi: boolean; options: Option[] };
+type Question = { id: QuestionId; multi: boolean; options: { id: string; icon: IconName }[] };
+type QuestionId = 'focus' | 'energy' | 'style' | 'blockers' | 'reminders';
+type T = (path: string, vars?: Record<string, string | number>) => string;
 
+// Texts live in i18n (onboarding.questions.<id>.options.<option>); only ids and icons are here.
 const QUESTIONS: Question[] = [
   {
     id: 'focus',
-    title: 'What would you like ORDINA to help you with?',
-    subtitle: 'Pick everything that applies.',
     multi: true,
     options: [
-      { id: 'work', label: 'Work & career', icon: 'briefcase-outline' },
-      { id: 'study', label: 'School & studies', icon: 'school-outline' },
-      { id: 'family', label: 'Home & family', icon: 'home-outline' },
-      { id: 'health', label: 'Health & fitness', icon: 'fitness-outline' },
-      { id: 'business', label: 'My business or side project', icon: 'rocket-outline' },
+      { id: 'work', icon: 'briefcase-outline' },
+      { id: 'study', icon: 'school-outline' },
+      { id: 'health', icon: 'fitness-outline' },
+      { id: 'family', icon: 'home-outline' },
+      { id: 'business', icon: 'rocket-outline' },
+      { id: 'finance', icon: 'wallet-outline' },
+      { id: 'social', icon: 'people-outline' },
+      { id: 'creative', icon: 'color-palette-outline' },
     ],
   },
   {
     id: 'energy',
-    title: 'When do you do your best work?',
-    subtitle: 'ORDINA will put important tasks in your strongest hours.',
     multi: false,
     options: [
-      { id: 'early', label: 'Early morning (5–9 AM)', icon: 'partly-sunny-outline' },
-      { id: 'morning', label: 'Late morning (9 AM–12 PM)', icon: 'sunny-outline' },
-      { id: 'afternoon', label: 'Afternoon (12–5 PM)', icon: 'cafe-outline' },
-      { id: 'evening', label: 'Evening (5–9 PM)', icon: 'moon-outline' },
-      { id: 'night', label: "I'm a night owl", icon: 'star-outline' },
+      { id: 'early', icon: 'partly-sunny-outline' },
+      { id: 'morning', icon: 'sunny-outline' },
+      { id: 'afternoon', icon: 'cafe-outline' },
+      { id: 'evening', icon: 'moon-outline' },
+      { id: 'night', icon: 'star-outline' },
     ],
   },
   {
     id: 'style',
-    title: 'How do you like to plan?',
-    subtitle: 'You can always switch later.',
     multi: false,
     options: [
-      { id: 'talk', label: 'I tell ORDINA in my own words', icon: 'chatbubbles-outline' },
-      { id: 'auto', label: 'Plan my day for me', icon: 'sparkles-outline' },
-      { id: 'manual', label: 'I like to plan everything myself', icon: 'create-outline' },
+      { id: 'talk', icon: 'chatbubbles-outline' },
+      { id: 'auto', icon: 'sparkles-outline' },
+      { id: 'manual', icon: 'create-outline' },
     ],
   },
   {
     id: 'blockers',
-    title: 'What usually gets in your way?',
-    subtitle: 'Be honest, ORDINA is here to help.',
     multi: true,
     options: [
-      { id: 'overload', label: 'Too many things at once', icon: 'layers-outline' },
-      { id: 'forget', label: 'I forget things', icon: 'help-circle-outline' },
-      { id: 'procrastinate', label: 'Putting things off', icon: 'hourglass-outline' },
-      { id: 'interruptions', label: 'Unexpected interruptions', icon: 'flash-outline' },
+      { id: 'overload', icon: 'layers-outline' },
+      { id: 'forget', icon: 'help-circle-outline' },
+      { id: 'procrastinate', icon: 'hourglass-outline' },
+      { id: 'interruptions', icon: 'flash-outline' },
     ],
   },
   {
     id: 'reminders',
-    title: 'How should ORDINA remind you?',
-    subtitle: 'We will only notify you the way you choose.',
     multi: false,
     options: [
-      { id: 'before', label: 'A few minutes before each task', icon: 'alarm-outline' },
-      { id: 'night', label: 'A summary the night before', icon: 'calendar-outline' },
-      { id: 'important', label: 'Only for important things', icon: 'flag-outline' },
-      { id: 'none', label: "I'll check the app myself", icon: 'notifications-off-outline' },
+      { id: 'before', icon: 'alarm-outline' },
+      { id: 'night', icon: 'calendar-outline' },
+      { id: 'important', icon: 'flag-outline' },
+      { id: 'none', icon: 'notifications-off-outline' },
     ],
   },
 ];
 
 /** Personal promises shown at the end, based on what the user picked. */
-function personalPlan(answers: OnboardingAnswers) {
+function personalPlan(answers: OnboardingAnswers, t: T) {
   const lines: { icon: IconName; text: string }[] = [];
+  const groups = focusGroups(answers);
+  if (answers.focus?.length) {
+    const list = groups.slice(0, 3).map((group) => t(`categories.groups.${group}`)).join(', ');
+    lines.push({ icon: 'pricetags-outline', text: t('onboarding.plan.categories', { list }) });
+  }
   const energy = answers.energy?.[0];
-  const energyText: Record<string, string> = {
-    early: 'Schedule your most important work early in the morning',
-    morning: 'Protect your late mornings for deep work',
-    afternoon: 'Keep your afternoons for the tasks that matter most',
-    evening: 'Plan focused time in your evenings',
-    night: 'Respect your night-owl rhythm when planning',
+  if (energy) lines.push({ icon: 'sunny-outline', text: t(`onboarding.plan.${energy}`) });
+  const blockerIcons: Record<string, IconName> = {
+    overload: 'layers-outline',
+    forget: 'alarm-outline',
+    procrastinate: 'play-circle-outline',
+    interruptions: 'swap-horizontal-outline',
   };
-  if (energy) lines.push({ icon: 'sunny-outline', text: energyText[energy] });
-  if (answers.blockers?.includes('overload')) lines.push({ icon: 'layers-outline', text: 'Break busy days into a calm, clear plan' });
-  if (answers.blockers?.includes('forget')) lines.push({ icon: 'alarm-outline', text: 'Remind you before anything slips' });
-  if (answers.blockers?.includes('procrastinate')) lines.push({ icon: 'play-circle-outline', text: 'Tell you exactly what to do next' });
-  if (answers.blockers?.includes('interruptions')) lines.push({ icon: 'swap-horizontal-outline', text: 'Re-plan your day when things change' });
-  if (answers.style?.[0] === 'talk') lines.push({ icon: 'mic-outline', text: 'Turn what you say or snap into tasks' });
-  if (lines.length < 3) lines.push({ icon: 'stats-chart-outline', text: 'Show your progress every day and month' });
-  if (lines.length < 3) lines.push({ icon: 'calendar-outline', text: 'Keep your tasks and calendar in sync' });
+  for (const blocker of answers.blockers ?? []) {
+    if (blockerIcons[blocker]) lines.push({ icon: blockerIcons[blocker], text: t(`onboarding.plan.${blocker}`) });
+  }
+  if (answers.style?.[0] === 'talk') lines.push({ icon: 'mic-outline', text: t('onboarding.plan.talk') });
+  if (lines.length < 3) lines.push({ icon: 'stats-chart-outline', text: t('onboarding.plan.progress') });
+  if (lines.length < 3) lines.push({ icon: 'calendar-outline', text: t('onboarding.plan.calendar') });
   return lines.slice(0, 4);
 }
 
 export default function OnboardingScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const completeOnboarding = useAuthStore((s) => s.completeOnboarding);
   const isSignedIn = useAuthStore((s) => s.isSignedIn);
@@ -154,18 +155,22 @@ export default function OnboardingScreen() {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
         <OnboardingArt />
+        {/* Floats over the artwork so the welcome layout stays exactly the same. */}
+        <View style={[styles.languageCorner, { top: insets.top + 10 }]}>
+          <LanguageButton />
+        </View>
         <Animated.View style={[styles.welcomeCopy, { opacity: fade }]}>
-          <ThemedText style={[styles.headline, compact && styles.headlineCompact]}>Tell ORDINA what you need to do</ThemedText>
-          <ThemedText style={[styles.subhead, { color: theme.primary }]}>Put order in your day</ThemedText>
+          <ThemedText style={[styles.headline, compact && styles.headlineCompact]}>{t('onboarding.headline')}</ThemedText>
+          <ThemedText style={[styles.subhead, { color: theme.primary }]}>{t('onboarding.subhead')}</ThemedText>
           <ThemedText themeColor="textSecondary" style={styles.body}>
-            Answer a few quick questions so ORDINA can plan the way you work. It takes less than a minute.
+            {t('onboarding.body')}
           </ThemedText>
         </Animated.View>
         <View style={styles.actions}>
-          <PrimaryButton glow label="Get started" onPress={() => setStep(0)} />
+          <PrimaryButton glow label={t('onboarding.getStarted')} onPress={() => setStep(0)} />
           <Pressable onPress={() => void goTo('/sign-in')} style={styles.textButton}>
             <ThemedText themeColor="textSecondary" style={styles.textButtonLabel}>
-              I already have an account
+              {t('onboarding.haveAccount')}
             </ThemedText>
           </Pressable>
         </View>
@@ -182,11 +187,11 @@ export default function OnboardingScreen() {
               <Ionicons name="checkmark-done" size={28} color={theme.primary} />
             </View>
             <View style={{ gap: 6 }}>
-              <ThemedText style={styles.questionTitle}>You&apos;re all set!</ThemedText>
-              <ThemedText themeColor="textSecondary" style={styles.body}>Here is how ORDINA will help you:</ThemedText>
+              <ThemedText style={styles.questionTitle}>{t('onboarding.allSet')}</ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.body}>{t('onboarding.howHelp')}</ThemedText>
             </View>
             <View style={[styles.planCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              {personalPlan(answers).map((line) => (
+              {personalPlan(answers, t).map((line) => (
                 <View key={line.text} style={styles.planRow}>
                   <View style={[styles.planIcon, { backgroundColor: theme.backgroundSelected }]}>
                     <Ionicons name={line.icon} size={18} color={theme.primary} />
@@ -195,28 +200,23 @@ export default function OnboardingScreen() {
                 </View>
               ))}
             </View>
-            {LOCAL_MODE ? (
-              <PrimaryButton
-                label="Start planning"
-                onPress={() => void saveAnswers(answers).then(completeOnboarding).then(routeAfterAuth)}
-              />
-            ) : isSignedIn ? (
-              <PrimaryButton label="Back to ORDINA" onPress={() => router.replace(href('/(tabs)'))} />
+            {isSignedIn ? (
+              <PrimaryButton label={t('onboarding.backToApp')} onPress={() => router.replace(href('/(tabs)'))} />
             ) : (
               <>
-            <ThemedText style={styles.sectionLabel}>Create your free account</ThemedText>
-            {FEATURES.socialSignIn ? <SocialAuthButtons /> : null}
-            <Pressable
-              onPress={() => void goTo('/sign-up')}
-              style={[styles.emailButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
-              <Ionicons name="mail-outline" size={20} color={theme.text} />
-              <ThemedText style={styles.emailLabel}>Continue with email</ThemedText>
-            </Pressable>
-            <Pressable onPress={() => void goTo('/sign-in')} style={styles.textButton}>
-              <ThemedText themeColor="textSecondary" style={styles.textButtonLabel}>
-                I already have an account · <ThemedText style={{ color: theme.primary, fontFamily: 'Poppins_600SemiBold' }}>Sign in</ThemedText>
-              </ThemedText>
-            </Pressable>
+                <ThemedText style={styles.sectionLabel}>{t('onboarding.createAccount')}</ThemedText>
+                <SocialAuthButtons />
+                <Pressable
+                  onPress={() => void goTo('/sign-up')}
+                  style={[styles.emailButton, { borderColor: theme.border, backgroundColor: theme.card }]}>
+                  <Ionicons name="mail-outline" size={20} color={theme.text} />
+                  <ThemedText style={styles.emailLabel}>{t('onboarding.continueEmail')}</ThemedText>
+                </Pressable>
+                <Pressable onPress={() => void goTo('/sign-in')} style={styles.textButton}>
+                  <ThemedText themeColor="textSecondary" style={styles.textButtonLabel}>
+                    {t('onboarding.alreadyHave')} · <ThemedText style={{ color: theme.primary, fontFamily: 'Poppins_600SemiBold' }}>{t('onboarding.signInLink')}</ThemedText>
+                  </ThemedText>
+                </Pressable>
               </>
             )}
           </Animated.View>
@@ -228,14 +228,14 @@ export default function OnboardingScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
       <View style={styles.topBar}>
-        <Pressable accessibilityLabel="Back" hitSlop={10} onPress={() => setStep((current) => current - 1)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+        <Pressable accessibilityLabel={t('common.back')} hitSlop={10} onPress={() => setStep((current) => current - 1)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
           <Ionicons name="chevron-back" size={20} color={theme.text} />
         </Pressable>
         <View style={[styles.progressTrack, { backgroundColor: theme.border }]}>
           <View style={[styles.progressFill, { backgroundColor: theme.primary, width: `${((step + 1) / QUESTIONS.length) * 100}%` }]} />
         </View>
         <Pressable hitSlop={10} onPress={() => setStep(QUESTIONS.length)}>
-          <ThemedText themeColor="textSecondary" style={styles.skipAll}>Skip all</ThemedText>
+          <ThemedText themeColor="textSecondary" style={styles.skipAll}>{t('onboarding.skipAll')}</ThemedText>
         </Pressable>
       </View>
 
@@ -247,10 +247,10 @@ export default function OnboardingScreen() {
             gap: 8,
           }}>
           <ThemedText themeColor="textSecondary" style={styles.stepLabel}>
-            Question {step + 1} of {QUESTIONS.length}
+            {t('onboarding.questionOf', { n: step + 1, total: QUESTIONS.length })}
           </ThemedText>
-          <ThemedText style={[styles.questionTitle, compact && styles.headlineCompact]}>{question!.title}</ThemedText>
-          <ThemedText themeColor="textSecondary" style={styles.body}>{question!.subtitle}</ThemedText>
+          <ThemedText style={[styles.questionTitle, compact && styles.headlineCompact]}>{t(`onboarding.questions.${question!.id}.title`)}</ThemedText>
+          <ThemedText themeColor="textSecondary" style={styles.body}>{t(`onboarding.questions.${question!.id}.subtitle`)}</ThemedText>
           <View style={styles.options}>
             {question!.options.map((option) => {
               const active = selected.includes(option.id);
@@ -271,7 +271,7 @@ export default function OnboardingScreen() {
                   <View style={[styles.optionIcon, { backgroundColor: active ? theme.primary : theme.backgroundElement }]}>
                     <Ionicons name={option.icon} size={18} color={active ? '#FFFFFF' : theme.primary} />
                   </View>
-                  <ThemedText style={styles.optionLabel}>{option.label}</ThemedText>
+                  <ThemedText style={styles.optionLabel}>{t(`onboarding.questions.${question!.id}.options.${option.id}`)}</ThemedText>
                   <Ionicons
                     name={active ? (question!.multi ? 'checkbox' : 'radio-button-on') : (question!.multi ? 'square-outline' : 'radio-button-off')}
                     size={22}
@@ -286,13 +286,13 @@ export default function OnboardingScreen() {
 
       <View style={styles.actions}>
         <PrimaryButton
-          label={step === QUESTIONS.length - 1 ? 'Finish' : 'Next'}
+          label={step === QUESTIONS.length - 1 ? t('onboarding.finish') : t('common.next')}
           disabled={!selected.length}
           onPress={() => setStep((current) => current + 1)}
         />
         <Pressable onPress={() => setStep((current) => current + 1)} style={styles.textButton}>
           <ThemedText themeColor="textSecondary" style={styles.textButtonLabel}>
-            Skip this question
+            {t('onboarding.skipQuestion')}
           </ThemedText>
         </Pressable>
       </View>
@@ -302,6 +302,7 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 20 },
+  languageCorner: { position: 'absolute', right: 20, zIndex: 2 },
   welcomeCopy: { flex: 1, justifyContent: 'flex-end', paddingBottom: 28, gap: 8 },
   headline: { fontSize: 32, lineHeight: 40, fontFamily: 'Poppins_700Bold' },
   headlineCompact: { fontSize: 24, lineHeight: 32 },
