@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AppState, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ContactActions } from '@/components/contact-actions';
@@ -79,7 +79,7 @@ export default function HomeScreen() {
   const { width } = useWindowDimensions();
   const compact = width < 380;
   const user = useAuthStore((s) => s.user);
-  const { tasks, toggleComplete, toggleInProgress, loadTasks } = useTasksStore();
+  const { tasks, loadError, loadErrorDetail, toggleComplete, toggleInProgress, loadTasks } = useTasksStore();
   const {
     goals,
     reminders,
@@ -100,8 +100,18 @@ export default function HomeScreen() {
   // Tapping a Dashboard number shows only those tasks.
   const [statusFilter, setStatusFilter] = useState<DashboardStatus | null>(null);
 
-  useEffect(() => {
+  // Read the saved tasks again whenever Home is shown and whenever the app comes back to the front.
+  useFocusEffect(useCallback(() => {
     void loadTasks();
+  }, [loadTasks]));
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void loadTasks();
+    });
+    return () => subscription.remove();
+  }, [loadTasks]);
+
+  useEffect(() => {
     // Offline mode: goals, reminders, notifications and the server dashboard don't exist.
     if (!FEATURES.serverWorkspace) return;
     void Promise.all([loadGoals(), loadReminders(), loadNotifications()])
@@ -234,6 +244,21 @@ export default function HomeScreen() {
             </Pressable>
           ) : null}
         </View>
+
+        {loadError ? (
+          <View accessibilityRole="alert" style={[styles.loadNotice, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
+            <Ionicons name="folder-open-outline" size={20} color={theme.primary} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <ThemedText style={styles.loadNoticeTitle}>{t('home.loadFailed')}</ThemedText>
+              {loadErrorDetail ? (
+                <ThemedText themeColor="textSecondary" style={styles.loadNoticeDetail} numberOfLines={2}>{loadErrorDetail}</ThemedText>
+              ) : null}
+            </View>
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => void loadTasks()}>
+              <ThemedText style={{ color: theme.primary, fontFamily: 'Poppins_600SemiBold' }}>{t('common.tryAgain')}</ThemedText>
+            </Pressable>
+          </View>
+        ) : null}
 
         {chips.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipScroll} contentContainerStyle={styles.chipRow}>
@@ -629,6 +654,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   time: { width: 52, fontSize: 11, lineHeight: 15 },
+  loadNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 12 },
+  loadNoticeTitle: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
+  loadNoticeDetail: { fontSize: 11 },
   searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 46, marginBottom: 10 },
   searchInput: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 14, paddingVertical: 10 },
   chipScroll: { marginBottom: 16, flexGrow: 0 },

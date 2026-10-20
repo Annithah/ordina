@@ -186,6 +186,7 @@ export const en = {
     notYou: 'Not you? Sign out',
   },
   home: {
+    loadFailed: "We could not open your saved tasks just now.",
     showingStatus: "{status} · {n} tasks",
     showAll: "Show all",
     morning: 'Good morning',
@@ -414,6 +415,7 @@ export const en = {
     problemTitle: 'Something did not work',
   },
   profile: {
+    savedTasks: "{n} tasks saved on this phone",
     title: 'Settings',
     editProfile: 'Edit profile',
     nameLabel: 'Your name',

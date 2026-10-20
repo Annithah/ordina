@@ -148,6 +148,7 @@ export const hi: PartialTranslation = {
     notYou: 'आप नहीं हैं? साइन आउट करें',
   },
   home: {
+    loadFailed: "अभी आपके सेव किए काम नहीं खुल सके।",
     showingStatus: "{status} · {n} काम",
     showAll: "सभी दिखाएँ",
     morning: 'सुप्रभात', afternoon: 'नमस्ते', evening: 'शुभ संध्या', there: 'दोस्त',
@@ -297,6 +298,7 @@ export const hi: PartialTranslation = {
     problemTitle: 'कुछ ठीक से नहीं हुआ',
   },
   profile: {
+    savedTasks: "इस फ़ोन पर {n} काम सेव हैं",
     title: 'सेटिंग्स', editProfile: 'प्रोफ़ाइल बदलें', nameLabel: 'आपका नाम', nameSaved: 'आपका नाम सेव हो गया',
     signedInWith: '{provider} से साइन इन', providerEmail: 'ईमेल',
     sectionAccount: 'खाता', sectionPreferences: 'पसंद', sectionPlanning: 'योजना', sectionData: 'डेटा और गोपनीयता', sectionAbout: 'जानकारी',

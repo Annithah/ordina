@@ -148,6 +148,7 @@ export const de: PartialTranslation = {
     notYou: 'Nicht du? Abmelden',
   },
   home: {
+    loadFailed: "Deine gespeicherten Aufgaben konnten gerade nicht geöffnet werden.",
     showingStatus: "{status} · {n} Aufgaben",
     showAll: "Alle zeigen",
     morning: 'Guten Morgen', afternoon: 'Guten Tag', evening: 'Guten Abend', there: 'du',
@@ -297,6 +298,7 @@ export const de: PartialTranslation = {
     problemTitle: 'Etwas hat nicht geklappt',
   },
   profile: {
+    savedTasks: "{n} Aufgaben auf diesem Handy gespeichert",
     title: 'Einstellungen', editProfile: 'Profil bearbeiten', nameLabel: 'Dein Name', nameSaved: 'Dein Name ist gespeichert',
     signedInWith: 'Angemeldet mit {provider}', providerEmail: 'E-Mail',
     sectionAccount: 'KONTO', sectionPreferences: 'EINSTELLUNGEN', sectionPlanning: 'PLANUNG', sectionData: 'DATEN & DATENSCHUTZ', sectionAbout: 'ÜBER',

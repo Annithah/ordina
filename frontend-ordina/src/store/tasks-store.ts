@@ -51,6 +51,8 @@ interface TasksState {
   loading: boolean;
   /** Last load error; the previous list stays visible so a flaky network never looks like "no tasks". */
   loadError: string | null;
+  /** The technical reason of the last load error, shown small so problems can be reported. */
+  loadErrorDetail: string | null;
   loadTasks: () => Promise<void>;
   getTaskById: (id: string) => Task | undefined;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>;
@@ -95,6 +97,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
   loading: true,
   loadError: null,
+  loadErrorDetail: null,
 
   getTaskById: (id) => get().tasks.find((task) => task.id === id),
 
@@ -103,9 +106,13 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       // Offline mode: tasks live on this phone (SQLite); otherwise on the ORDINA server.
       const raw = LOCAL_MODE ? await listLocalTasks() : (await api.get('/api/tasks')).data?.tasks;
       const tasks = Array.isArray(raw) ? raw.map(normalizeTask) : [];
-      set({ tasks, loading: false, loadError: null });
+      set({ tasks, loading: false, loadError: null, loadErrorDetail: null });
     } catch (error) {
-      set({ loading: false, loadError: friendlyError(error, 'Could not load your tasks.') });
+      set({
+        loading: false,
+        loadError: friendlyError(error, 'Could not load your tasks.'),
+        loadErrorDetail: error instanceof Error ? error.message : String(error),
+      });
     }
   },
 
