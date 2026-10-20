@@ -2,7 +2,7 @@
  * Expo config. app.json holds the base settings; this file adjusts them for the
  * Google Play build (EAS profiles "production" and "preview" set EXPO_PUBLIC_STORE_BUILD=1).
  *
- * The store build ships Daily Task Planning, task reminders and ORDINA AI (with optional voice),
+ * The store build ships Daily Task Planning, task reminders and ORDINA AI (voice, photos, videos),
  * so it drops the native plugins and Android permissions of features that are switched off in
  * src/config/release.ts. Microphone and notifications are asked for when first used.
  */
@@ -25,13 +25,11 @@ function withCleartextTraffic(config) {
 const STORE_EXCLUDED_PLUGINS = new Set([
   'expo-contacts',
   'expo-location',
-  'expo-image-picker',
   'expo-apple-authentication',
 ]);
 
 // Removed from the final AndroidManifest even if a library declares them.
 const STORE_BLOCKED_PERMISSIONS = [
-  'android.permission.CAMERA',
   'android.permission.READ_CONTACTS',
   'android.permission.WRITE_CONTACTS',
   'android.permission.ACCESS_COARSE_LOCATION',
@@ -42,10 +40,7 @@ const STORE_BLOCKED_PERMISSIONS = [
   'android.permission.USE_EXACT_ALARM',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
-  'android.permission.READ_MEDIA_IMAGES',
-  'android.permission.READ_MEDIA_VIDEO',
   'android.permission.READ_MEDIA_AUDIO',
-  'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
   'android.permission.SYSTEM_ALERT_WINDOW',
   'android.permission.FOREGROUND_SERVICE',
   'android.permission.FOREGROUND_SERVICE_MICROPHONE',
@@ -86,7 +81,16 @@ module.exports = ({ config }) => {
     plugins: (config.plugins ?? []).filter((plugin) => !STORE_EXCLUDED_PLUGINS.has(pluginName(plugin))),
     android: {
       ...config.android,
-      permissions: ['android.permission.RECORD_AUDIO', 'android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED'],
+      // Microphone (voice), notifications (task reminders), camera and photos (attach in ORDINA AI).
+      permissions: [
+        'android.permission.RECORD_AUDIO',
+        'android.permission.POST_NOTIFICATIONS',
+        'android.permission.RECEIVE_BOOT_COMPLETED',
+        'android.permission.CAMERA',
+        'android.permission.READ_MEDIA_IMAGES',
+        'android.permission.READ_MEDIA_VIDEO',
+        'android.permission.READ_MEDIA_VISUAL_USER_SELECTED',
+      ],
       blockedPermissions: [...blocked],
     },
   };
