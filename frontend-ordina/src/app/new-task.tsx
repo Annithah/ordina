@@ -23,9 +23,13 @@ import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
+import { CATEGORY_GROUPS, categoryInfo, focusGroups, splitCategories, type CategoryInfo } from '@/features/categories';
+import { bestTime, defaultCategory, defaultReminderLead } from '@/features/starting-point';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/notifications';
 import { useAuthStore } from '@/store/auth-store';
+import { usePreferencesStore } from '@/store/preferences-store';
 import { useTasksStore, type Category, type Priority, type Task } from '@/store/tasks-store';
 import { addLocalDays, localDateKey } from '@/utils/dates';
 import {
@@ -35,7 +39,6 @@ import {
   findFreeSlot,
   formatDuration,
   formatTime12,
-  friendlyDay,
   minutesFromTime,
   minutesToDuration,
   plannedMinutes,
@@ -52,19 +55,10 @@ import { toConfirmPayload } from '@/utils/plan-draft';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
-const CATEGORIES: { id: Category; label: string; icon: IconName; color: string }[] = [
-  { id: 'work', label: 'Work', icon: 'briefcase-outline', color: '#5C4DF2' },
-  { id: 'personal', label: 'Personal', icon: 'person-outline', color: '#F59E0B' },
-  { id: 'health', label: 'Health', icon: 'fitness-outline', color: '#22C55E' },
-  { id: 'learning', label: 'Learning', icon: 'school-outline', color: '#3B82F6' },
-  { id: 'design', label: 'Creative', icon: 'color-palette-outline', color: '#EC4899' },
-  { id: 'database', label: 'Errands', icon: 'cart-outline', color: '#06B6D4' },
-];
-
-const PRIORITIES: { id: Priority; label: string; color: string }[] = [
-  { id: 'low', label: 'Low', color: '#3B82F6' },
-  { id: 'medium', label: 'Medium', color: '#F59E0B' },
-  { id: 'high', label: 'High', color: '#EF4444' },
+const PRIORITIES: { id: Priority; color: string }[] = [
+  { id: 'low', color: '#3B82F6' },
+  { id: 'medium', color: '#F59E0B' },
+  { id: 'high', color: '#EF4444' },
 ];
 
 // The date/time picker is native-only; the web build keeps the preset chips.
@@ -81,12 +75,12 @@ const REPEATS: { id: string; label: string; recurrence: NonNullable<Task['recurr
 ];
 
 const REMINDERS: { minutes: number | null; label: string }[] = [
-  { minutes: null, label: 'Off' },
-  { minutes: 0, label: 'At start' },
-  { minutes: 10, label: '10 min before' },
-  { minutes: 30, label: '30 min before' },
-  { minutes: 60, label: '1 hour before' },
-  { minutes: 1440, label: '1 day before' },
+  { minutes: null, label: 'task.reminderOff' },
+  { minutes: 0, label: 'task.atStart' },
+  { minutes: 10, label: 'task.min10' },
+  { minutes: 30, label: 'task.min30' },
+  { minutes: 60, label: 'task.hour1' },
+  { minutes: 1440, label: 'task.day1' },
 ];
 
 function dateFromKey(key: string, time?: string) {
@@ -143,8 +137,64 @@ function Chip({ label, active, onPress, color, icon }: {
   );
 }
 
+/** "Custom" duration: hours and minutes (5-minute steps), between 5 minutes and 24 hours. */
+function CustomDuration({ visible, minutes, onSave, onCancel }: {
+  visible: boolean;
+  minutes: number;
+  onSave: (minutes: number) => void;
+  onCancel: () => void;
+}) {
+  const theme = useTheme();
+  const { t } = useI18n();
+  // Remounted (new key) each time it opens, so it starts from the current duration.
+  const [hours, setHours] = useState(Math.floor(minutes / 60));
+  const [mins, setMins] = useState((Math.round((minutes % 60) / 5) * 5) % 60);
+
+  const total = Math.min(24 * 60, Math.max(5, hours * 60 + mins));
+  const steppers = [
+    { label: t('task.hours'), value: hours, minus: () => setHours((h) => Math.max(0, h - 1)), plus: () => setHours((h) => Math.min(24, h + 1)) },
+    { label: t('task.minutes'), value: mins, minus: () => setMins((m) => (m + 55) % 60), plus: () => setMins((m) => (m + 5) % 60) },
+  ];
+
+  return (
+    <Modal transparent visible={visible} animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={styles.backdrop} onPress={onCancel}>
+        <Pressable style={[styles.sheet, { backgroundColor: theme.card }]}>
+          <ThemedText style={styles.headerTitle}>{t('task.customTitle')}</ThemedText>
+          <View style={styles.stepperRow}>
+            {steppers.map((item) => (
+              <View key={item.label} style={[styles.stepper, { borderColor: theme.border }]}>
+                <ThemedText themeColor="textSecondary" style={styles.helper}>{item.label}</ThemedText>
+                <View style={styles.stepperControls}>
+                  <Pressable accessibilityLabel={`${item.label} −`} onPress={item.minus} style={[styles.stepperBtn, { backgroundColor: theme.backgroundElement }]}>
+                    <Ionicons name="remove" size={18} color={theme.text} />
+                  </Pressable>
+                  <ThemedText style={styles.stepperValue}>{item.value}</ThemedText>
+                  <Pressable accessibilityLabel={`${item.label} +`} onPress={item.plus} style={[styles.stepperBtn, { backgroundColor: theme.backgroundElement }]}>
+                    <Ionicons name="add" size={18} color={theme.text} />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+          <ThemedText themeColor="textSecondary" style={[styles.summary, { fontSize: 14 }]}>{formatDuration(total)}</ThemedText>
+          <View style={styles.customActions}>
+            <Pressable accessibilityRole="button" onPress={onCancel} style={[styles.cancelBtn, { borderColor: theme.border }]}>
+              <ThemedText style={styles.slotText}>{t('common.cancel')}</ThemedText>
+            </Pressable>
+            <View style={{ flex: 1 }}>
+              <PrimaryButton label={t('common.save')} onPress={() => onSave(total)} />
+            </View>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export default function NewTaskScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string }>();
   const presetDate = typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : undefined;
   const presetTime = typeof params.time === 'string' && /^\d{2}:\d{2}$/.test(params.time) ? params.time : undefined;
@@ -171,10 +221,10 @@ export default function NewTaskScreen() {
       <SafeAreaView style={[styles.safe, styles.center, { backgroundColor: theme.background }]}>
         {lookupDone ? (
           <>
-            <ThemedText style={styles.headerTitle}>Task not found</ThemedText>
-            <ThemedText themeColor="textSecondary">It may have been deleted.</ThemedText>
+            <ThemedText style={styles.headerTitle}>{t('task.notFound')}</ThemedText>
+            <ThemedText themeColor="textSecondary">{t('task.notFoundBody')}</ThemedText>
             <View style={{ width: 220 }}>
-              <PrimaryButton label="Back to tasks" onPress={() => router.back()} />
+              <PrimaryButton label={t('task.backToTasks')} onPress={() => router.back()} />
             </View>
           </>
         ) : (
@@ -188,6 +238,8 @@ export default function NewTaskScreen() {
 
 function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; presetDate?: string; presetTime?: string }) {
   const theme = useTheme();
+  const { t, locale } = useI18n();
+  const answers = usePreferencesStore((s) => s.answers);
   const isSignedIn = useAuthStore((s) => s.isSignedIn);
   const { tasks, addTask, updateTask, deleteTask, loadTasks } = useTasksStore();
   const isEditMode = Boolean(taskToEdit);
@@ -195,7 +247,10 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const [title, setTitle] = useState(taskToEdit?.title ?? '');
   const [notes, setNotes] = useState(taskToEdit?.description ?? '');
   const [priority, setPriority] = useState<Priority>(taskToEdit?.priority ?? 'medium');
-  const [category, setCategory] = useState<Category>(taskToEdit?.category ?? 'personal');
+  // A new task starts from the intro answers: the user's own area, their reminder choice.
+  const [category, setCategory] = useState<Category>(taskToEdit?.category ?? defaultCategory(answers));
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   const [dueDate, setDueDate] = useState(taskToEdit?.dueDate ?? presetDate ?? localDateKey());
   const [startTime, setStartTime] = useState(taskToEdit?.startTime ?? presetTime ?? '');
   const [minutes, setMinutes] = useState(durationToMinutes(taskToEdit?.duration ?? '1h'));
@@ -205,7 +260,10 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
       && (item.rule ?? undefined) === (taskToEdit.recurrence === 'custom' ? taskToEdit.recurrenceRule : undefined));
     return repeat?.id ?? 'none';
   });
-  const [reminderLead, setReminderLead] = useState<number | null>(taskToEdit?.reminder ? 10 : null);
+  const [reminderLead, setReminderLead] = useState<number | null>(
+    taskToEdit ? (taskToEdit.reminder ? 10 : null) : defaultReminderLead(answers, 'medium'),
+  );
+  const reminderTouched = useRef(Boolean(taskToEdit));
   const [contact, setContact] = useState<{ name: string; phone?: string } | null>(
     taskToEdit?.contactName ? { name: taskToEdit.contactName, phone: taskToEdit.contactPhone } : null,
   );
@@ -234,16 +292,40 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const isPast = dueDate < today || (dueDate === today && startTime !== '' && (minutesFromTime(startTime) ?? 0) < new Date().getHours() * 60 + new Date().getMinutes());
 
   const dateOptions = [
-    { label: 'Today', value: today },
-    { label: 'Tomorrow', value: addLocalDays(today, 1) },
-    { label: 'Saturday', value: nextWeekday(6) },
-    { label: 'Next Monday', value: nextWeekday(1) },
+    { label: t('task.today'), value: today },
+    { label: t('task.tomorrow'), value: addLocalDays(today, 1) },
+    { label: t('task.saturday'), value: nextWeekday(6) },
+    { label: t('task.nextMonday'), value: nextWeekday(1) },
   ];
   const timeOptions = [
-    { label: 'Morning', value: '09:00' },
-    { label: 'Afternoon', value: '14:00' },
-    { label: 'Evening', value: '18:00' },
+    { label: t('task.morning'), value: '09:00' },
+    { label: t('task.afternoon'), value: '14:00' },
+    { label: t('task.evening'), value: '18:00' },
   ];
+  // The intro's "best hours" answer is offered as its own time when it isn't one of the presets.
+  const favouriteTime = bestTime(answers);
+  const showFavourite = Boolean(favouriteTime && !timeOptions.some((item) => item.value === favouriteTime));
+  const presetTimes = [...timeOptions.map((item) => item.value), ...(showFavourite ? [favouriteTime!] : [])];
+  const customDuration = !DURATIONS.includes(minutes);
+
+  const { mine, others } = splitCategories(focusGroups(answers));
+  // The task's own category always shows, even when it is outside the user's areas.
+  const myCategories: CategoryInfo[] = mine.some((item) => item.id === category) || showAllCategories
+    ? mine
+    : [categoryInfo(category), ...mine];
+
+  /** Today / Tomorrow, or the date in the app language. */
+  function dayLabel(key: string) {
+    if (key === today) return t('task.today');
+    if (key === addLocalDays(today, 1)) return t('task.tomorrow');
+    return new Date(`${key}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function choosePriority(next: Priority) {
+    setPriority(next);
+    // "Only important things": a new task gets a reminder once it is marked High.
+    if (!reminderTouched.current) setReminderLead(defaultReminderLead(answers, next));
+  }
 
   function applyDetected() {
     if (!detected) return;
@@ -296,14 +378,14 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     const nextDay = addLocalDays(dueDate, 1);
     const tomorrowSlot = findFreeSlot(tasks, nextDay, minutes, taskToEdit?.id);
     Alert.alert(
-      'This day is full',
+      t('task.dayFull'),
       tomorrowSlot
-        ? `There is no ${formatDuration(minutes)} gap left on ${friendlyDay(dueDate)}. ${friendlyDay(nextDay)} at ${formatTime12(tomorrowSlot)} is free.`
-        : `There is no ${formatDuration(minutes)} gap left on ${friendlyDay(dueDate)}.`,
+        ? t('task.noGapMove', { duration: formatDuration(minutes), day: dayLabel(dueDate), next: dayLabel(nextDay), time: formatTime12(tomorrowSlot) })
+        : t('task.noGap', { duration: formatDuration(minutes), day: dayLabel(dueDate) }),
       tomorrowSlot
         ? [
-          { text: 'Keep as is', style: 'cancel' },
-          { text: 'Move it', onPress: () => { setDueDate(nextDay); setStartTime(tomorrowSlot); } },
+          { text: t('task.keep'), style: 'cancel' },
+          { text: t('task.moveIt'), onPress: () => { setDueDate(nextDay); setStartTime(tomorrowSlot); } },
         ]
         : undefined,
     );
@@ -363,7 +445,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
       setSaving(false);
       const serverErrors = error?.response?.data?.errors;
       if (serverErrors && typeof serverErrors === 'object') setErrors(serverErrors);
-      setSaveError(friendlyError(error, 'Unable to save the task. Please try again.'));
+      setSaveError(friendlyError(error, t('task.saveFailed')));
       return;
     }
 
@@ -376,15 +458,15 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
           const when = new Date(start.getTime() - reminderLead * 60_000);
           return scheduleTaskReminder(id, payload.title, when.getTime() > Date.now() ? when : start, {
             body: startTime
-              ? `${friendlyDay(dueDate)} at ${formatTime12(startTime)}${contact ? ` · ${contact.name}` : ''}`
-              : `Planned for ${friendlyDay(dueDate).toLowerCase()}`,
+              ? `${dayLabel(dueDate)} · ${formatTime12(startTime)}${contact ? ` · ${contact.name}` : ''}`
+              : t('task.plannedFor', { day: dayLabel(dueDate) }),
           });
         })()
         : cancelTaskReminder(id);
       void Promise.resolve(reminder).catch(() => undefined);
     }
     setSaving(false);
-    toast.success(isEditMode ? 'Changes saved' : 'Task added to your plan');
+    toast.success(isEditMode ? t('task.changesSaved') : t('task.added'));
     router.back();
   }
 
@@ -418,18 +500,18 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     try {
       await deleteTask(taskToEdit.id);
       setConfirmingDelete(false);
-      toast.success('Task deleted');
+      toast.success(t('task.deleted'));
       router.back();
     } catch (error) {
       setDeleting(false);
       setConfirmingDelete(false);
-      toast.error(friendlyError(error, 'Could not delete the task. Please try again.'));
+      toast.error(friendlyError(error, t('task.deleteFailed')));
     }
   }
 
   const summary = [
-    friendlyDay(dueDate),
-    startTime ? formatTime12(startTime) : 'Any time',
+    dayLabel(dueDate),
+    startTime ? formatTime12(startTime) : t('task.anytime'),
     formatDuration(minutes),
   ].join(' · ');
 
@@ -476,12 +558,12 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable accessibilityLabel="Close" onPress={() => router.back()} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+        <Pressable accessibilityLabel={t('common.close')} onPress={() => router.back()} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
           <Ionicons name="close" size={20} color={theme.text} />
         </Pressable>
-        <ThemedText style={styles.headerTitle}>{isEditMode ? 'Edit task' : 'New task'}</ThemedText>
+        <ThemedText style={styles.headerTitle}>{isEditMode ? t('task.editTitle') : t('task.newTitle')}</ThemedText>
         {isEditMode ? (
-          <Pressable accessibilityLabel="Delete task" onPress={() => setConfirmingDelete(true)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+          <Pressable accessibilityLabel={t('common.delete')} onPress={() => setConfirmingDelete(true)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
             <Ionicons name="trash-outline" size={18} color={theme.danger} />
           </Pressable>
         ) : (
@@ -498,7 +580,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
                 setTitle(text);
                 if (errors.title) setErrors(({ title: _cleared, ...rest }) => rest);
               }}
-              placeholder={isEditMode ? 'What do you need to do?' : 'What do you need to do? You can write your whole plan.'}
+              placeholder={isEditMode ? t('task.placeholderEdit') : t('task.placeholder')}
               placeholderTextColor={theme.textSecondary}
               accessibilityLabel={isEditMode ? 'Task title' : 'Task or plan'}
               autoFocus={!isEditMode}
@@ -521,28 +603,26 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
               <View style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="list" size={14} color={theme.primary} />
                 <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
-                  {plannedCount} tasks found. You can check them before saving.
+                  {t('task.found', { n: plannedCount })}
                 </ThemedText>
               </View>
             ) : detected && (detected.date !== dueDate || (detected.time && detected.time !== startTime)) ? (
               <Pressable onPress={applyDetected} style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="flash" size={14} color={theme.primary} />
                 <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
-                  Set to {detected.label}
+                  {t('task.setTo', { label: detected.label })}
                 </ThemedText>
-                <ThemedText themeColor="textSecondary" style={styles.detectedHint}>Tap to apply</ThemedText>
+                <ThemedText themeColor="textSecondary" style={styles.detectedHint}>{t('task.tapToApply')}</ThemedText>
               </Pressable>
             ) : (
               <ThemedText themeColor="textSecondary" style={styles.tip}>
-                {isEditMode
-                  ? 'Tip: type “tomorrow at 7am” and ORDINA fills in the time.'
-                  : 'Tip: write several things, like “gym at 6pm, then call mom”, and ORDINA makes separate tasks.'}
+                {isEditMode ? t('task.tipEdit') : t('task.tip')}
               </ThemedText>
             )}
             <TextInput
               value={notes}
               onChangeText={setNotes}
-              placeholder="Add a description (optional)"
+              placeholder={t('task.description')}
               placeholderTextColor={theme.textSecondary}
               accessibilityLabel="Task description"
               maxLength={DESCRIPTION_MAX}
@@ -553,10 +633,10 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
 
           <Section
             icon="calendar-outline"
-            title="When"
+            title={t('task.when')}
             right={
               <ThemedText style={[styles.sectionValue, { color: isPast ? theme.danger : theme.textSecondary }]}>
-                {isPast ? 'In the past' : friendlyDay(dueDate)}
+                {isPast ? t('task.inPast') : dayLabel(dueDate)}
               </ThemedText>
             }>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
@@ -565,39 +645,42 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
               ))}
               {HAS_NATIVE_PICKER ? (
                 <Chip
-                  label={dateOptions.some((item) => item.value === dueDate) ? 'Pick date' : friendlyDay(dueDate)}
+                  label={dateOptions.some((item) => item.value === dueDate) ? t('task.pickDate') : dayLabel(dueDate)}
                   icon="calendar"
                   active={!dateOptions.some((item) => item.value === dueDate)}
                   onPress={() => openPicker('date')}
                 />
               ) : !dateOptions.some((item) => item.value === dueDate) ? (
-                <Chip label={friendlyDay(dueDate)} icon="calendar" active onPress={() => undefined} />
+                <Chip label={dayLabel(dueDate)} icon="calendar" active onPress={() => undefined} />
               ) : null}
             </ScrollView>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
-              <Chip label="Any time" active={!startTime} onPress={() => setStartTime('')} />
-              {timeOptions.map((item) => (
-                <Chip key={item.label} label={item.label} active={startTime === item.value} onPress={() => setStartTime(item.value)} />
-              ))}
+              <Chip label={t('task.anytime')} icon="infinite-outline" active={!startTime} onPress={() => setStartTime('')} />
               {HAS_NATIVE_PICKER ? (
                 <Chip
-                  label={startTime && !timeOptions.some((item) => item.value === startTime) ? formatTime12(startTime) : 'Pick time'}
+                  label={startTime && !presetTimes.includes(startTime) ? formatTime12(startTime) : t('task.pickTime')}
                   icon="time-outline"
-                  active={Boolean(startTime) && !timeOptions.some((item) => item.value === startTime)}
+                  active={Boolean(startTime) && !presetTimes.includes(startTime)}
                   onPress={() => openPicker('time')}
                 />
-              ) : startTime && !timeOptions.some((item) => item.value === startTime) ? (
+              ) : startTime && !presetTimes.includes(startTime) ? (
                 <Chip label={formatTime12(startTime)} icon="time-outline" active onPress={() => undefined} />
               ) : null}
+              {showFavourite ? (
+                <Chip label={formatTime12(favouriteTime)} icon="star-outline" active={startTime === favouriteTime} onPress={() => setStartTime(favouriteTime!)} />
+              ) : null}
+              {timeOptions.map((item) => (
+                <Chip key={item.value} label={item.label} active={startTime === item.value} onPress={() => setStartTime(item.value)} />
+              ))}
             </ScrollView>
 
             <View style={[styles.load, { backgroundColor: theme.backgroundElement }]}>
               <View style={styles.loadHead}>
                 <ThemedText themeColor="textSecondary" style={styles.loadText}>
-                  {friendlyDay(dueDate)}: {formatDuration(dayLoad)} already planned
+                  {t('task.alreadyPlanned', { day: dayLabel(dueDate), time: formatDuration(dayLoad) })}
                 </ThemedText>
                 <ThemedText style={[styles.loadText, { color: loadColor }]}>
-                  {loadAfter > 8 * 60 ? 'Overloaded' : loadAfter > 5 * 60 ? 'Busy' : 'Light'}
+                  {loadAfter > 8 * 60 ? t('task.overloaded') : loadAfter > 5 * 60 ? t('task.busy') : t('task.light')}
                 </ThemedText>
               </View>
               <View style={[styles.loadTrack, { backgroundColor: theme.border }]}>
@@ -609,13 +692,13 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
               <View style={[styles.warning, { borderColor: theme.warning }]}>
                 <Ionicons name="warning-outline" size={16} color={theme.warning} />
                 <ThemedText style={styles.warningText}>
-                  Overlaps with {clashes.map((task) => `“${task.title}”`).join(', ')}
+                  {t('task.overlaps', { list: clashes.map((task) => `“${task.title}”`).join(', ') })}
                 </ThemedText>
               </View>
             ) : null}
             <Pressable onPress={suggestSlot} style={[styles.slotBtn, { borderColor: theme.primary }]}>
               <Ionicons name="sparkles-outline" size={16} color={theme.primary} />
-              <ThemedText style={[styles.slotText, { color: theme.primary }]}>Find a free slot</ThemedText>
+              <ThemedText style={[styles.slotText, { color: theme.primary }]}>{t('task.findSlot')}</ThemedText>
             </Pressable>
           </Section>
 
@@ -623,51 +706,58 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             <View style={[styles.warning, { borderColor: theme.danger }]}>
               <Ionicons name="flag-outline" size={16} color={theme.danger} />
               <ThemedText style={styles.warningText}>
-                Deadline: {friendlyDay(deadline.split('T')[0])}
-                {deadline.includes('T') ? `, before ${formatTime12(deadline.split('T')[1])}` : ''}
+                {t('task.deadline', { day: dayLabel(deadline.split('T')[0]) })}
+                {deadline.includes('T') ? t('task.deadlineBefore', { time: formatTime12(deadline.split('T')[1]) }) : ''}
               </ThemedText>
-              <Pressable accessibilityRole="button" accessibilityLabel="Remove deadline" onPress={() => setDeadline(null)} style={styles.removeDeadline}>
-                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Remove</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel={t('common.remove')} onPress={() => setDeadline(null)} style={styles.removeDeadline}>
+                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>{t('common.remove')}</ThemedText>
               </Pressable>
             </View>
           ) : null}
 
-          <Section icon="hourglass-outline" title="Duration" right={<ThemedText themeColor="textSecondary" style={styles.sectionValue}>{formatDuration(minutes)}</ThemedText>}>
+          <Section icon="hourglass-outline" title={t('task.duration')} right={<ThemedText themeColor="textSecondary" style={styles.sectionValue}>{formatDuration(minutes)}</ThemedText>}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              <Chip
+                label={customDuration ? formatDuration(minutes) : t('task.custom')}
+                icon="options-outline"
+                active={customDuration}
+                onPress={() => setCustomOpen(true)}
+              />
               {DURATIONS.map((value) => (
                 <Chip key={value} label={formatDuration(value)} active={minutes === value} onPress={() => setMinutes(value)} />
               ))}
             </ScrollView>
             {startTime ? (
               <ThemedText themeColor="textSecondary" style={styles.helper}>
-                Ends at {formatTime12(timeFromMinutes((minutesFromTime(startTime) ?? 0) + minutes))}
+                {t('task.endsAt', { time: formatTime12(timeFromMinutes((minutesFromTime(startTime) ?? 0) + minutes)) })}
               </ThemedText>
             ) : null}
           </Section>
 
-          <Section icon="flag-outline" title="Priority">
+          <Section icon="flag-outline" title={t('task.priority')}>
             <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
               {PRIORITIES.map((item) => {
                 const active = priority === item.id;
                 return (
                   <Pressable
                     key={item.id}
-                    onPress={() => setPriority(item.id)}
+                    onPress={() => choosePriority(item.id)}
                     style={[styles.segmentItem, active && { backgroundColor: theme.card, borderColor: item.color }]}>
                     <View style={[styles.dot, { backgroundColor: item.color }]} />
-                    <ThemedText style={[styles.segmentText, active && { color: item.color }]}>{item.label}</ThemedText>
+                    <ThemedText style={[styles.segmentText, active && { color: item.color }]}>{t(`task.${item.id}`)}</ThemedText>
                   </Pressable>
                 );
               })}
             </View>
           </Section>
 
-          <Section icon="pricetag-outline" title="Category">
+          <Section icon="pricetag-outline" title={t('task.category')}>
+            {others.length ? <ThemedText themeColor="textSecondary" style={styles.helper}>{t('categories.mine')}</ThemedText> : null}
             <View style={styles.wrap}>
-              {CATEGORIES.map((item) => (
+              {myCategories.map((item) => (
                 <Chip
                   key={item.id}
-                  label={item.label}
+                  label={t(`categories.items.${item.id}`)}
                   icon={item.icon}
                   color={item.color}
                   active={category === item.id}
@@ -675,12 +765,47 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
                 />
               ))}
             </View>
+            {showAllCategories
+              ? CATEGORY_GROUPS.filter((group) => others.some((item) => item.group === group.id)).map((group) => (
+                <View key={group.id} style={styles.categoryGroup}>
+                  <ThemedText themeColor="textSecondary" style={styles.helper}>{t(`categories.groups.${group.id}`)}</ThemedText>
+                  <View style={styles.wrap}>
+                    {others.filter((item) => item.group === group.id).map((item) => (
+                      <Chip
+                        key={item.id}
+                        label={t(`categories.items.${item.id}`)}
+                        icon={item.icon}
+                        color={item.color}
+                        active={category === item.id}
+                        onPress={() => setCategory(item.id)}
+                      />
+                    ))}
+                  </View>
+                </View>
+              ))
+              : null}
+            {others.length ? (
+              <Pressable accessibilityRole="button" onPress={() => setShowAllCategories((value) => !value)} style={styles.moreCategories}>
+                <ThemedText style={[styles.slotText, { color: theme.primary }]}>
+                  {showAllCategories ? t('categories.showLess') : t('categories.showAll')}
+                </ThemedText>
+                <Ionicons name={showAllCategories ? 'chevron-up' : 'chevron-down'} size={14} color={theme.primary} />
+              </Pressable>
+            ) : null}
           </Section>
 
-          {FEATURES.taskReminders ? <Section icon="notifications-outline" title="Reminder">
+          {FEATURES.taskReminders ? <Section icon="notifications-outline" title={t('task.reminder')}>
             <View style={styles.wrap}>
               {REMINDERS.map((item) => (
-                <Chip key={item.label} label={item.label} active={reminderLead === item.minutes} onPress={() => setReminderLead(item.minutes)} />
+                <Chip
+                  key={item.label}
+                  label={t(item.label)}
+                  active={reminderLead === item.minutes}
+                  onPress={() => {
+                    reminderTouched.current = true;
+                    setReminderLead(item.minutes);
+                  }}
+                />
               ))}
             </View>
           </Section> : null}
@@ -733,7 +858,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
             {repeatId !== 'none' ? ' · 🔁' : ''}
           </ThemedText>
           <PrimaryButton
-            label={saving ? 'Saving…' : isEditMode ? 'Save changes' : plannedCount > 1 ? `Review ${plannedCount} tasks` : 'Create task'}
+            label={saving ? t('task.saving') : isEditMode ? t('task.saveChanges') : plannedCount > 1 ? t('task.review', { n: plannedCount }) : t('task.create')}
             disabled={saving}
             onPress={() => void saveTask()}
           />
@@ -742,9 +867,9 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
 
       <ConfirmDialog
         visible={confirmingDelete}
-        title="Delete this task?"
-        message={`“${taskToEdit?.title ?? ''}” will be removed from your plan. This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t('task.deleteTitle')}
+        message={t('task.deleteBody', { title: taskToEdit?.title ?? '' })}
+        confirmLabel={t('common.delete')}
         destructive
         busy={deleting}
         onConfirm={() => void removeTask()}
@@ -767,11 +892,22 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
                   }}
                 />
               ) : null}
-              <PrimaryButton label="Done" onPress={() => setIosPicker(null)} />
+              <PrimaryButton label={t('common.done')} onPress={() => setIosPicker(null)} />
             </Pressable>
           </Pressable>
         </Modal>
       ) : null}
+
+      <CustomDuration
+        key={customOpen ? 'open' : 'closed'}
+        visible={customOpen}
+        minutes={minutes}
+        onCancel={() => setCustomOpen(false)}
+        onSave={(value) => {
+          setMinutes(value);
+          setCustomOpen(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -815,6 +951,15 @@ const styles = StyleSheet.create({
   segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, paddingVertical: 9, borderWidth: 1, borderColor: 'transparent' },
   segmentText: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  categoryGroup: { gap: 6 },
+  moreCategories: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 36 },
+  stepperRow: { flexDirection: 'row', gap: 12 },
+  stepper: { flex: 1, borderWidth: 1, borderRadius: 14, padding: 10, alignItems: 'center', gap: 6 },
+  stepperControls: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  stepperBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  stepperValue: { fontSize: 22, fontFamily: 'Poppins_700Bold', minWidth: 36, textAlign: 'center' },
+  customActions: { flexDirection: 'row', gap: 10 },
+  cancelBtn: { flex: 1, borderWidth: 1, borderRadius: 16, alignItems: 'center', justifyContent: 'center', minHeight: 52 },
   contactRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
   contactName: { fontFamily: 'Poppins_500Medium' },
