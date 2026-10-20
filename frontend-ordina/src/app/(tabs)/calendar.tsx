@@ -10,37 +10,23 @@ import { Pressable, ScrollView, StyleSheet, TouchableOpacity, View } from 'react
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
+import { useCategories } from '@/hooks/use-categories';
 import { useTheme } from '@/hooks/use-theme';
 import { useTasksStore, type Task } from '@/store/tasks-store';
+import { formatDuration, formatMonthYear, formatTime, weekdayName } from '@/i18n/format';
+import { durationMinutes } from '@/logic/schedule';
+import { useI18n } from '@/providers/i18n-provider';
 import { localDateKey } from '@/utils/dates';
-import { HEALTH_LABEL, healthColor, taskHealth } from '@/utils/task-health';
+import { healthColor, taskHealth, type TaskHealth } from '@/utils/task-health';
 
 type ViewMode = 'week' | 'month';
 
 const HOURS = Array.from({ length: 24 }, (_, i) => i); // 12 AM – 11 PM
 const HOUR_HEIGHT = 64;
-const DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const HEALTH_KEY: Record<TaskHealth, string> = { completed: 'status.completed', inProgress: 'status.inProgress', overdue: 'status.overdue', planned: 'status.planned' };
 
 function padZero(n: number): string {
   return n.toString().padStart(2, '0');
-}
-
-function formatHour(h: number): string {
-  const period = h >= 12 ? 'PM' : 'AM';
-  const display = h % 12 === 0 ? 12 : h % 12;
-  return `${display} ${period}`;
-}
-
-function getCategoryColor(category: string): string {
-  const map: Record<string, string> = {
-    work: '#5C4DF2',
-    health: '#22C55E',
-    learning: '#7C3AED',
-    personal: '#F59E0B',
-    design: '#EC4899',
-    database: '#06B6D4',
-  };
-  return map[category] ?? '#64748B';
 }
 
 function getWeekDays(baseDate: Date): Date[] {
@@ -61,6 +47,11 @@ function hourOf(task: Task) {
 
 export default function CalendarScreen() {
   const theme = useTheme();
+  const { t: tr, locale } = useI18n();
+  const categoryInfo = useCategories();
+  // Week starts on Monday in this view: narrow weekday names Mon..Sun in the app's language.
+  const dayLabels = [1, 2, 3, 4, 5, 6, 0].map((day) => weekdayName(locale, day, 'narrow'));
+  const formatHour = (hour: number) => formatTime(locale, `${padZero(hour)}:00`);
   const { tasks, loadTasks } = useTasksStore();
   const scrollRef = useRef<ScrollView>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('week');
@@ -131,7 +122,7 @@ export default function CalendarScreen() {
     });
   }
 
-  const monthLabel = weekBase.toLocaleString('default', { month: 'long', year: 'numeric' });
+  const monthLabel = formatMonthYear(locale, weekBase.getFullYear(), weekBase.getMonth());
 
   // Month grid
   const monthStart = new Date(weekBase.getFullYear(), weekBase.getMonth(), 1);
@@ -146,10 +137,12 @@ export default function CalendarScreen() {
 
   function renderTask(t: Task) {
     const health = taskHealth(t, now);
-    const color = getCategoryColor(t.category);
+    const color = categoryInfo.find(t.categoryId).color;
     return (
       <Pressable
         key={t.id}
+        accessibilityRole="button"
+        accessibilityLabel={`${t.title}, ${tr(HEALTH_KEY[health])}`}
         onPress={() => router.push({ pathname: '/new-task', params: { id: t.id } })}
         style={[
           styles.scheduleBlock,
@@ -162,7 +155,7 @@ export default function CalendarScreen() {
           {t.completed ? <Ionicons name="checkmark-circle" size={16} color="#FFFFFF" /> : null}
         </View>
         <ThemedText style={styles.blockSub} numberOfLines={1}>
-          {[t.startTime, t.duration, HEALTH_LABEL[health]].filter(Boolean).join(' • ')}
+          {[t.startTime ? formatTime(locale, t.startTime) : tr('dates.anytime'), formatDuration(locale, durationMinutes(t.duration)), tr(HEALTH_KEY[health])].filter(Boolean).join(' • ')}
         </ThemedText>
       </Pressable>
     );
@@ -174,14 +167,14 @@ export default function CalendarScreen() {
       <View style={[styles.header, { borderBottomColor: theme.border }]}>
         <View style={styles.monthRow}>
           <TouchableOpacity
-            accessibilityLabel="Previous"
+            accessibilityLabel={viewMode === 'week' ? tr('week.previous') : tr('schedule.prevMonth')}
             onPress={() => (viewMode === 'week' ? shiftWeek(-7) : shiftMonth(-1))}
             hitSlop={10}>
             <Ionicons name="chevron-back" size={20} color={theme.text} />
           </TouchableOpacity>
           <ThemedText style={styles.monthLabel}>{monthLabel}</ThemedText>
           <TouchableOpacity
-            accessibilityLabel="Next"
+            accessibilityLabel={viewMode === 'week' ? tr('week.next') : tr('schedule.nextMonth')}
             onPress={() => (viewMode === 'week' ? shiftWeek(7) : shiftMonth(1))}
             hitSlop={10}>
             <Ionicons name="chevron-forward" size={20} color={theme.text} />
@@ -191,7 +184,7 @@ export default function CalendarScreen() {
         <View style={styles.headerActions}>
           {!isTodaySelected ? (
             <Pressable onPress={goToday} style={[styles.todayBtn, { borderColor: theme.primary }]}>
-              <ThemedText style={[styles.todayText, { color: theme.primary }]}>Today</ThemedText>
+              <ThemedText style={[styles.todayText, { color: theme.primary }]}>{tr('week.today')}</ThemedText>
             </Pressable>
           ) : null}
           <View style={[styles.toggle, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
@@ -201,7 +194,7 @@ export default function CalendarScreen() {
                 onPress={() => setViewMode(m)}
                 style={[styles.toggleBtn, { backgroundColor: viewMode === m ? theme.primary : 'transparent' }]}>
                 <ThemedText style={[styles.toggleText, { color: viewMode === m ? '#FFFFFF' : theme.textSecondary }]}>
-                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                  {m === 'week' ? tr('schedule.weekView') : tr('schedule.monthView')}
                 </ThemedText>
               </Pressable>
             ))}
@@ -212,7 +205,7 @@ export default function CalendarScreen() {
       {viewMode === 'month' ? (
         <ScrollView contentContainerStyle={styles.monthWrap}>
           <View style={styles.monthGrid}>
-            {DAY_LABELS.map((label, i) => (
+            {dayLabels.map((label, i) => (
               <ThemedText key={`${label}-${i}`} themeColor="textSecondary" style={styles.monthWeekday}>
                 {label}
               </ThemedText>
@@ -249,7 +242,7 @@ export default function CalendarScreen() {
             })}
           </View>
           <ThemedText themeColor="textSecondary" style={styles.monthHint}>
-            Tap a day to see its hour-by-hour schedule.
+            {tr('schedule.monthHint')}
           </ThemedText>
         </ScrollView>
       ) : (
@@ -264,7 +257,7 @@ export default function CalendarScreen() {
               return (
                 <Pressable key={iso} onPress={() => setSelectedDate(d)} style={styles.dayHeaderCell}>
                   <ThemedText style={[styles.dayLetter, { color: isSelected ? theme.primary : theme.textSecondary }]}>
-                    {DAY_LABELS[i]}
+                    {dayLabels[i]}
                   </ThemedText>
                   <View
                     style={[
@@ -290,7 +283,7 @@ export default function CalendarScreen() {
             {untimedTasks.length ? (
               <View style={[styles.untimed, { borderBottomColor: theme.border }]}>
                 <ThemedText themeColor="textSecondary" style={styles.untimedLabel}>
-                  Any time
+                  {tr('dates.anytime')}
                 </ThemedText>
                 <View style={styles.timeSlot}>{untimedTasks.map(renderTask)}</View>
               </View>
@@ -303,7 +296,7 @@ export default function CalendarScreen() {
                 <Pressable
                   key={hour}
                   onPress={() => addAt(hour)}
-                  accessibilityLabel={`Add a task at ${formatHour(hour)}`}
+                  accessibilityLabel={`${tr('home.addTask')} · ${formatHour(hour)}`}
                   style={[styles.timeRow, { borderTopColor: theme.border }]}>
                   <ThemedText
                     themeColor="textSecondary"
@@ -324,7 +317,7 @@ export default function CalendarScreen() {
           </ScrollView>
 
           <Pressable
-            accessibilityLabel="Add task on this day"
+            accessibilityLabel={tr('week.addForDay')}
             onPress={() => addAt()}
             style={[styles.fab, { backgroundColor: theme.primary }]}>
             <Ionicons name="add" size={26} color="#FFFFFF" />

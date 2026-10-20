@@ -33,3 +33,8 @@ Thumbs.db
 # Build/cache
 coverage/
 .cache/
+# Built app files (share them, don't commit them)
+*.apk
+
+# Old per-build QR codes (ordina-apk-qr.png is the current one)
+ordina-apk-qr-*.png

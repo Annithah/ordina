@@ -1,301 +1,137 @@
 /**
- * ORDINA Profile & Settings Screen
- * Matches the dark-mode mockup (light mode default).
- * Shows: user avatar, name, email, preferences, AI settings, notifications.
+ * Profile tab. Signed out: the account panel (optional; "Continue without an account" is
+ * remembered). Signed in: avatar with initials, name, email, last backup time and sync status,
+ * Backup now, Sign out (never deletes tasks on the phone). Settings is always one tap away.
  */
-
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import { href } from '@/utils/href';
-import * as Linking from 'expo-linking';
-import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AccountPanel, AccountPrompt } from '@/components/account-panel';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import { SettingsRow, SettingsSection, useSyncLabel } from '@/components/settings-ui';
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
-import { useAppTheme } from '@/providers/theme-provider';
 import { useI18n } from '@/providers/i18n-provider';
-import { deleteAccount } from '@/services/ai';
-import { disconnectGoogleCalendar } from '@/services/google-calendar';
+import { syncNow, useSyncStore } from '@/services/sync';
 import { useAuthStore } from '@/store/auth-store';
-import { LOCALES } from '@/i18n/translations';
-import { FEATURES } from '@/config/release';
 
-const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL;
+// Remembers "Continue without an account" so the account panel doesn't open every time.
+const ACCOUNT_SKIPPED_KEY = 'ordina.accountSkipped';
 
-interface SettingRowProps {
-  label: string;
-  value?: string;
-  onPress?: () => void;
-  showChevron?: boolean;
+function initials(name: string, email: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const letters = parts.length >= 2 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] ?? email).slice(0, 2);
+  return letters.toUpperCase();
 }
 
-function SettingRow({ label, value, onPress, showChevron = true }: SettingRowProps) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.settingRow, { borderBottomColor: theme.border }]}
-    >
-      <ThemedText style={styles.settingLabel}>{label}</ThemedText>
-      <View style={styles.settingRight}>
-        {value && (
-          <ThemedText themeColor="textSecondary" style={styles.settingValue}>
-            {value}
-          </ThemedText>
-        )}
-        {showChevron && (
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        )}
-      </View>
-    </Pressable>
-  );
-}
-
-function SectionLabel({ title }: { title: string }) {
-  const theme = useTheme();
-  return (
-    <ThemedText
-      style={[styles.sectionLabel, { color: theme.textSecondary }]}
-      themeColor="textSecondary"
-    >
-      {title}
-    </ThemedText>
-  );
+function useSkipped() {
+  const [skipped, setSkipped] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    SecureStore.getItemAsync(ACCOUNT_SKIPPED_KEY)
+      .then((value) => alive && setSkipped(value === '1'))
+      .catch(() => alive && setSkipped(false));
+    return () => {
+      alive = false;
+    };
+  }, []);
+  const update = (value: boolean) => {
+    setSkipped(value);
+    void (value ? SecureStore.setItemAsync(ACCOUNT_SKIPPED_KEY, '1') : SecureStore.deleteItemAsync(ACCOUNT_SKIPPED_KEY)).catch(() => undefined);
+  };
+  return { skipped, skip: () => update(true), open: () => update(false) };
 }
 
 export default function ProfileScreen() {
   const theme = useTheme();
-  const { t, locale } = useI18n();
-  const { preference, setPreference } = useAppTheme();
-  const user = useAuthStore((s) => s.user);
-  const signOut = useAuthStore((s) => s.signOut);
-  const languageLabel = LOCALES.find((item) => item.id === locale)?.native ?? 'English';
+  const { t } = useI18n();
+  const { isSignedIn, user, signOut } = useAuthStore();
+  const { status, lastSyncAt } = useSyncStore();
+  const sync = useSyncLabel(status, lastSyncAt);
+  const account = useSkipped();
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top']}>
-      {/* Top right settings icon */}
       <View style={styles.topBar}>
-        <ThemedText style={styles.screenTitle}>{t('profile.title')}</ThemedText>
-        <Pressable hitSlop={8} onPress={() => router.push(href('/language'))}>
-          <Ionicons name="language-outline" size={22} color={theme.text} />
+        <ThemedText style={styles.screenTitle} accessibilityRole="header">{t('tabs.profile')}</ThemedText>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('settings.title')} hitSlop={8} onPress={() => router.push('/settings')} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+          <Ionicons name="settings-outline" size={20} color={theme.text} />
         </Pressable>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scroll, { paddingBottom: 100 }]}
-      >
-        {/* User card */}
-        <View style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
-            <ThemedText style={styles.avatarText}>
-              {(user?.name ?? 'O').slice(0, 1).toUpperCase()}
-            </ThemedText>
-          </View>
-          <View style={{ flex: 1 }}>
-            <ThemedText style={styles.userName}>{user?.name ?? t('profile.guest')}</ThemedText>
-            <ThemedText themeColor="textSecondary" style={styles.userEmail}>
-              {user?.email ?? t('profile.signInHint')}
-            </ThemedText>
-          </View>
-        </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
+        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
+          {isSignedIn && user ? (
+            <>
+              <View style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <View accessible accessibilityLabel={t('account.avatar', { initials: initials(user.name, user.email) })} style={[styles.avatar, { backgroundColor: theme.primary }]}>
+                  <ThemedText style={styles.avatarText}>{initials(user.name, user.email)}</ThemedText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={styles.userName} numberOfLines={1}>{user.name}</ThemedText>
+                  <ThemedText themeColor="textSecondary" style={styles.userEmail} numberOfLines={1}>{user.email}</ThemedText>
+                </View>
+              </View>
 
-        {/* Preferences */}
-        <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <SectionLabel title={t('profile.preferences')} />
-          <View style={styles.themeRow}>
-            <ThemedText style={styles.settingLabel}>{t('profile.theme')}</ThemedText>
-            <View style={[styles.themeOptions, { backgroundColor: theme.backgroundElement }]}>
-              {(
-                [
-                  { id: 'light' as const, icon: 'sunny-outline' as const, label: t('profile.light') },
-                  { id: 'dark' as const, icon: 'moon-outline' as const, label: t('profile.dark') },
-                  { id: 'system' as const, icon: 'phone-portrait-outline' as const, label: t('profile.system') },
-                ]
-              ).map((option) => (
-                <Pressable
-                  key={option.id}
-                  onPress={() => setPreference(option.id)}
-                  style={[styles.themeOption, preference === option.id && { backgroundColor: theme.primary }]}
-                >
-                  <Ionicons
-                    name={option.icon}
-                    size={16}
-                    color={preference === option.id ? theme.onPrimary : theme.textSecondary}
-                  />
-                  <ThemedText style={{ color: preference === option.id ? theme.onPrimary : theme.textSecondary, fontSize: 12 }}>
-                    {option.label}
-                  </ThemedText>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-          <SettingRow label={t('profile.language')} value={languageLabel} onPress={() => router.push(href('/language'))} />
-          <SettingRow label={t('profile.appLock')} onPress={() => router.push(href('/create-pin'))} />
-        </View>
+              <SettingsSection title={t('account.syncStatus')}>
+                <SettingsRow
+                  icon={sync.icon}
+                  label={sync.text}
+                  onPress={status === 'error' || status === 'waiting' ? () => void syncNow() : undefined}
+                  right={status === 'syncing' ? <ActivityIndicator color={theme.primary} /> : <View />}
+                />
+                <SettingsRow icon="cloud-upload-outline" label={t('backup.backupNow')} onPress={status === 'syncing' ? undefined : () => void syncNow()} />
+                <SettingsRow icon="cloud-outline" label={t('settings.backupRow')} last onPress={() => router.push('/backup')} />
+              </SettingsSection>
 
-        {/* Connections */}
-        <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <SectionLabel title="CONNECTIONS" />
-          {FEATURES.integrations ? (
-            <SettingRow
-              label="Google Calendar, contacts & permissions"
-              onPress={() => router.push(href('/integrations'))}
-            />
-          ) : null}
-          {FEATURES.reminders ? <SettingRow label="Reminders" onPress={() => router.push(href('/reminders'))} /> : null}
-          <SettingRow label="Replay introduction" onPress={() => router.push(href('/onboarding'))} />
-        </View>
+              <SettingsSection title={t('settings.account')}>
+                <SettingsRow icon="settings-outline" label={t('settings.title')} onPress={() => router.push('/settings')} />
+                <SettingsRow icon="log-out-outline" label={t('account.signOut')} danger last onPress={() => setConfirmSignOut(true)} />
+              </SettingsSection>
+            </>
+          ) : (
+            <>
+              {account.skipped === false ? <AccountPanel onSkip={account.skip} /> : null}
+              {account.skipped ? <AccountPrompt onOpen={account.open} /> : null}
+              <SettingsSection title={t('settings.title')}>
+                <SettingsRow icon="cloud-outline" label={t('settings.backupRow')} onPress={() => router.push('/backup')} />
+                <SettingsRow icon="settings-outline" label={t('settings.title')} last onPress={() => router.push('/settings')} />
+              </SettingsSection>
+            </>
+          )}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-        {/* Account */}
-        <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <SectionLabel title="ACCOUNT" />
-          {PRIVACY_URL ? (
-            <SettingRow label="Privacy policy" onPress={() => void Linking.openURL(PRIVACY_URL)} />
-          ) : null}
-          <Pressable
-            onPress={() => {
-              Alert.alert(
-                'Delete account?',
-                'This permanently deletes your ORDINA account, tasks, plans and reminders. This cannot be undone.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  {
-                    text: 'Delete',
-                    style: 'destructive',
-                    onPress: () => {
-                      void deleteAccount()
-                        .then(() => disconnectGoogleCalendar().catch(() => undefined))
-                        .then(() => signOut())
-                        .then(() => router.replace(href('/sign-in')))
-                        .catch((error: any) => {
-                          Alert.alert('Delete account', error?.response?.data?.message || 'Could not delete the account. Try again.');
-                        });
-                    },
-                  },
-                ],
-              );
-            }}
-            style={[styles.settingRow, { borderBottomColor: theme.border }]}>
-            <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>Delete account</ThemedText>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              void signOut().then(() => router.replace(href('/sign-in')));
-            }}
-            style={[styles.settingRow, { borderBottomColor: theme.border }]}>
-            <ThemedText style={[styles.settingLabel, { color: theme.danger }]}>{t('profile.signOut')}</ThemedText>
-          </Pressable>
-        </View>
-
-        {/* Notifications link */}
-        <Pressable
-          onPress={() => router.push(href('/notifications'))}
-          style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Ionicons name="notifications-outline" size={20} color={theme.primary} />
-          <ThemedText style={styles.notifLinkText}>View Notifications</ThemedText>
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
-        <Pressable onPress={() => router.push(href('/goals'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="flag-outline" size={20} color={theme.primary} />
-          <ThemedText style={styles.notifLinkText}>Manage Goals</ThemedText>
-          <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-        </Pressable>
-        {FEATURES.integrations ? (
-          <Pressable onPress={() => router.push(href('/integrations'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Ionicons name="phone-portrait-outline" size={20} color={theme.primary} />
-            <ThemedText style={styles.notifLinkText}>Phone integrations</ThemedText>
-            <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-          </Pressable>
-        ) : null}
-        {FEATURES.reminders ? (
-          <Pressable onPress={() => router.push(href('/reminders'))} style={[styles.notifLink, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Ionicons name="alarm-outline" size={20} color={theme.primary} />
-            <ThemedText style={styles.notifLinkText}>Manage Reminders</ThemedText>
-            <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-          </Pressable>
-        ) : null}
-
-        <ThemedText themeColor="textSecondary" style={styles.version}>
-          ORDINA v1.0.0 • Put order in your day
-        </ThemedText>
-      </ScrollView>
+      <ConfirmDialog
+        visible={confirmSignOut}
+        title={t('account.signOutTitle')}
+        message={t('account.signOutBody')}
+        confirmLabel={t('account.signOut')}
+        onConfirm={() => {
+          setConfirmSignOut(false);
+          void signOut().then(() => toast.success(t('account.signedOut')));
+        }}
+        onCancel={() => setConfirmSignOut(false)}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-  },
-  screenTitle: { fontSize: 20, fontFamily: 'Poppins_600SemiBold' },
-  scroll: { paddingHorizontal: 16, gap: 16, paddingTop: 8 },
-  userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
-  },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontFamily: 'Poppins_600SemiBold',
-  },
-  userName: { fontSize: 16, fontFamily: 'Poppins_600SemiBold' },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  screenTitle: { fontSize: 22, fontFamily: 'Poppins_700Bold' },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  scroll: { paddingHorizontal: 16, gap: 20, paddingTop: 8, paddingBottom: 40, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  userCard: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderRadius: 18, padding: 16 },
+  avatar: { width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { color: '#FFFFFF', fontSize: 22, fontFamily: 'Poppins_600SemiBold' },
+  userName: { fontSize: 17, fontFamily: 'Poppins_600SemiBold' },
   userEmail: { fontSize: 13, marginTop: 1 },
-  section: {
-    borderWidth: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    paddingTop: 4,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    letterSpacing: 1,
-    fontFamily: 'Poppins_600SemiBold',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 6,
-  },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-  },
-  settingLabel: { fontSize: 15, fontFamily: 'Poppins_400Regular' },
-  settingRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  settingValue: { fontSize: 14 },
-  notifLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-  },
-  notifLinkText: { flex: 1, fontSize: 15, fontFamily: 'Poppins_500Medium' },
-  version: { fontSize: 12, textAlign: 'center', paddingBottom: 8 },
-  themeRow: { gap: 10, paddingVertical: 12 },
-  themeOptions: { flexDirection: 'row', borderRadius: 10, padding: 3, gap: 3 },
-  themeOption: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
 });

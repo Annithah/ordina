@@ -8,13 +8,10 @@
     "start": "node src/server.js",
     "db:setup": "node node_modules/prisma/build/index.js migrate deploy",
     "db:generate": "node node_modules/prisma/build/index.js generate",
-    "db:test": "node scripts/test-db.js",
     "db:test:prisma": "node scripts/test-prisma.js",
-    "test": "npm run test:unit && npm run db:test",
-    "test:unit": "node --test \"test/**/*.test.js\"",
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.js\"",
     "postinstall": "node node_modules/prisma/build/index.js generate",
-    "start:prod": "node node_modules/prisma/build/index.js migrate deploy && node src/server.js",
-    "db:dev": "node node_modules/prisma/build/index.js dev --name ordina --detach --db-port 51214 --port 51213"
+    "start:prod": "node node_modules/prisma/build/index.js migrate deploy && node src/server.js"
   },
   "keywords": [],
   "author": "",
@@ -26,7 +23,6 @@
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "argon2": "^0.45.1",
-    "better-sqlite3": "^13.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -43,14 +39,10 @@
     "swagger-ui-express": "^5.0.1",
     "zod": "^4.4.3"
   },
-  "overrides": {
-    "better-sqlite3": "$better-sqlite3"
-  },
   "allowScripts": {
     "argon2@0.45.1": true,
     "prisma@7.10.0": true,
     "@prisma/engines@7.10.0": true,
-    "better-sqlite3@13.0.3": true,
     "@scarf/scarf": false
   },
   "engines": {

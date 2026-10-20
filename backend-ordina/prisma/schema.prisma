@@ -27,6 +27,8 @@ model User {
   places        Place[]
   planningProfile  PlanningProfile?
   planConfirmations AiPlanConfirmation[]
+  refreshTokens RefreshToken[]
+  syncItems     SyncItem[]
 
   @@map("users")
 }
@@ -162,6 +164,7 @@ model PasswordReset {
   codeHash  String   @map("code_hash")
   expiresAt DateTime @map("expires_at")
   used      Boolean  @default(false)
+  attempts  Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -261,4 +264,36 @@ model TaskDeadline {
   task     Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@map("task_deadlines")
+}
+
+/// Sign-in sessions: one row per refresh token (only its SHA-256 hash is stored). Rotated on
+/// every refresh; revoked on sign-out, password change and password reset.
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// Server backup of the phone's tasks and categories, one row per record. `data` is the JSON the
+/// phone sent; `seq` increases on every change so phones can ask for "everything after X".
+model SyncItem {
+  userId    Int      @map("user_id")
+  kind      String
+  itemId    String   @map("item_id")
+  data      String?
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(3)
+  deleted   Boolean  @default(false)
+  seq       BigInt   @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, kind, itemId])
+  @@index([userId, seq])
+  @@map("sync_items")
 }

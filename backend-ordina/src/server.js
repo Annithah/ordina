@@ -6,8 +6,8 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const prisma = require('./lib/prisma');
 const { signToken, requireUser } = require('./lib/auth');
-const { sendMail } = require('./lib/mail');
-const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
+const { mailConfigured } = require('./lib/mail');
+const { accountRoutes } = require('./routes/account');
 const ai = require('./lib/ai');
 const schedule = require('./lib/schedule');
 const taskValidation = require('./lib/task-validation');
@@ -32,6 +32,8 @@ app.use(cors({
 }));
 // Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
 app.use('/api/ai', express.json({ limit: '30mb' }));
+// A first sync from a phone with many tasks can be large.
+app.use('/api/sync', express.json({ limit: '25mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 // Method, path, status and timing only: no request bodies, so no task text or prompts in logs.
@@ -45,7 +47,7 @@ app.use(rateLimit({
 }));
 // Stricter limits where guessing or cost matters.
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { message: 'Too many attempts. Please wait a few minutes and try again.' } });
-app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete'], authLimiter);
+app.use(['/account/delete', '/api/device/session'], authLimiter);
 app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { message: 'You are sending requests very quickly. Please wait a moment.' } }));
 
 app.get('/health', async (_req, res) => {
@@ -63,204 +65,15 @@ app.get('/api/health', async (_req, res) => {
     res.json({
       ok: true,
       service: 'ordina-backend',
-      db: 'postgresql',
+      db: 'postgres',
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
-        googleAuth: Boolean(
-          process.env.GOOGLE_CLIENT_ID
-            || process.env.GOOGLE_IOS_CLIENT_ID
-            || process.env.GOOGLE_ANDROID_CLIENT_ID
-            || process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
-        ),
-        appleAuth: Boolean(process.env.APPLE_CLIENT_ID || process.env.APPLE_BUNDLE_ID),
-        smtp: Boolean(process.env.SMTP_HOST),
+        email: mailConfigured(),
       },
     });
   } catch (error) {
     res.status(500).json({ ok: false, message: 'Database unavailable', error: isProduction ? undefined : error.message });
-  }
-});
-
-app.post('/api/auth/register', async (req, res) => {
-  try {
-    const { name, email, password } = req.body ?? {};
-
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Name, email and password are required.' });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (existing) {
-      return res.status(409).json({ message: 'Email already registered.' });
-    }
-
-    const passwordHash = require('argon2').hash(password);
-    const user = await prisma.user.create({
-      data: {
-        email: normalizedEmail,
-        displayName: String(name).trim(),
-        passwordHash: await passwordHash,
-      },
-      select: {
-        id: true,
-        email: true,
-        displayName: true,
-      },
-    });
-
-    return res.status(201).json({
-      user: {
-        id: user.id,
-        name: user.displayName,
-        email: user.email,
-      },
-      token: signToken(user),
-    });
-  } catch (error) {
-    console.error('Register error:', error.code || error.message);
-    if (error.code === 'P2002') {
-      return res.status(409).json({ message: 'Email already registered.' });
-    }
-    return res.status(500).json({ message: 'Unable to register user.', error: error.message });
-  }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body ?? {};
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required.' });
-    }
-
-    const normalizedEmail = String(email).trim().toLowerCase();
-    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
-    }
-
-    const valid = await require('argon2').verify(user.passwordHash, String(password));
-    if (!valid) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
-    }
-
-    return res.json({
-      user: {
-        id: user.id,
-        name: user.displayName,
-        email: user.email,
-      },
-      token: signToken(user),
-    });
-  } catch (error) {
-    console.error('Login error:', error.code || error.message);
-    return res.status(500).json({ message: 'Unable to sign in.', error: error.message });
-  }
-});
-
-app.post('/api/auth/google', async (req, res) => {
-  try {
-    const idToken = String(req.body?.idToken || req.body?.id_token || '').trim();
-    if (!idToken) return res.status(400).json({ message: 'Google idToken is required.' });
-    const identity = await verifyGoogleIdToken(idToken);
-    return res.json(await upsertOAuthUser(identity));
-  } catch (error) {
-    return res.status(error.status || 500).json({ message: error.message || 'Google sign-in failed.' });
-  }
-});
-
-app.post('/api/auth/apple', async (req, res) => {
-  try {
-    const identityToken = String(req.body?.identityToken || req.body?.idToken || '').trim();
-    if (!identityToken) return res.status(400).json({ message: 'Apple identityToken is required.' });
-    const identity = await verifyAppleIdentityToken(identityToken);
-    if (req.body?.fullName) {
-      const parts = [req.body.fullName.givenName, req.body.fullName.familyName].filter(Boolean);
-      if (parts.length) identity.name = parts.join(' ');
-    }
-    return res.json(await upsertOAuthUser(identity));
-  } catch (error) {
-    return res.status(error.status || 500).json({ message: error.message || 'Apple sign-in failed.' });
-  }
-});
-
-app.post('/api/auth/forgot', async (req, res) => {
-  try {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    if (!email) return res.status(400).json({ message: 'Email is required.' });
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      if (isProduction && !process.env.SMTP_HOST) {
-        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
-      }
-      return res.json({ emailed: Boolean(process.env.SMTP_HOST), message: 'If that account exists, a reset code was issued.' });
-    }
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    await prisma.passwordReset.updateMany({ where: { userId: user.id, used: false }, data: { used: true } });
-    await prisma.passwordReset.create({
-      data: {
-        userId: user.id,
-        codeHash: await require('argon2').hash(code),
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000),
-      },
-    });
-    const mailed = await sendMail({
-      to: email,
-      subject: 'ORDINA password reset code',
-      text: `Your ORDINA reset code is ${code}. It expires in 15 minutes.`,
-    });
-    if (!mailed.sent) {
-      // Returning the code is only acceptable on a developer's machine: in production it would
-      // let anyone reset any account by knowing its email address.
-      if (isProduction) {
-        await prisma.passwordReset.updateMany({ where: { userId: user.id, used: false }, data: { used: true } });
-        return res.status(503).json({ emailed: false, message: 'Password reset by email is not available yet. Please contact support.' });
-      }
-      return res.json({
-        emailed: false,
-        code,
-        message: 'Email delivery is not configured (SMTP_HOST missing). Use this 6-digit code now to set a new password.',
-      });
-    }
-    return res.json({ emailed: true, message: 'A reset code was sent to your email.' });
-  } catch (error) {
-    return res.status(500).json({ message: 'Unable to start password reset.', error: error.message });
-  }
-});
-
-app.post('/api/auth/reset', async (req, res) => {
-  try {
-    const email = String(req.body?.email || '').trim().toLowerCase();
-    const code = String(req.body?.code || '').trim();
-    const newPassword = String(req.body?.newPassword || req.body?.password || '');
-    if (!email || !code || newPassword.length < 8) {
-      return res.status(400).json({ message: 'Email, 6-digit code, and a new password (8+ characters) are required.' });
-    }
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) return res.status(400).json({ message: 'Invalid reset code.' });
-    const resets = await prisma.passwordReset.findMany({
-      where: { userId: user.id, used: false, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-    });
-    let matched = null;
-    for (const reset of resets) {
-      if (await require('argon2').verify(reset.codeHash, code)) {
-        matched = reset;
-        break;
-      }
-    }
-    if (!matched) return res.status(400).json({ message: 'Invalid or expired reset code.' });
-    await prisma.passwordReset.update({ where: { id: matched.id }, data: { used: true } });
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: await require('argon2').hash(newPassword) },
-    });
-    return res.json({ ok: true, message: 'Password updated. You can sign in with the new password.' });
-  } catch (error) {
-    return res.status(500).json({ message: 'Unable to reset password.', error: error.message });
   }
 });
 
@@ -277,6 +90,8 @@ async function deleteAccountData(userId) {
       prisma.aiMessage.deleteMany({ where: { userId } }),
       prisma.passwordReset.deleteMany({ where: { userId } }),
       prisma.place.deleteMany({ where: { userId } }),
+      prisma.syncItem.deleteMany({ where: { userId } }),
+      prisma.refreshToken.deleteMany({ where: { userId } }),
       prisma.task.updateMany({ where: { userId }, data: { parentTaskId: null } }),
       prisma.task.deleteMany({ where: { userId } }),
       prisma.goal.deleteMany({ where: { userId } }),
@@ -286,16 +101,38 @@ async function deleteAccountData(userId) {
     ]);
 }
 
-app.delete('/api/auth/account', async (req, res) => {
-  const userId = requireUser(req, res);
-  if (!userId) return;
+/**
+ * Offline (development) mode: the phone keeps tasks on the device and has no email account.
+ * It identifies itself with a random device id and gets a token only for ORDINA AI, so the
+ * learned planning profile is kept per phone. Nothing else is stored for the device.
+ */
+app.post('/api/device/session', async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deviceId)) {
+    return res.status(400).json({ message: 'A valid device id is required.' });
+  }
+  const email = `device-${deviceId}@device.ordina.local`;
   try {
-    await deleteAccountData(userId);
-    return res.json({ ok: true });
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const name = String(req.body?.name || '').trim().slice(0, 80) || 'ORDINA device';
+      user = await prisma.user.create({
+        data: {
+          email,
+          displayName: name,
+          // Random, never shown: device accounts cannot sign in with a password.
+          passwordHash: await require('argon2').hash(require('node:crypto').randomBytes(32).toString('hex')),
+        },
+      });
+    }
+    return res.json({ token: signToken(user) });
   } catch (error) {
-    return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
+    console.error('Device session failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not start an ORDINA AI session.' });
   }
 });
+
+app.use(accountRoutes(prisma, { isProduction, deleteAccountData }));
 
 /** Public account-deletion page (Google Play requires a web link as well as in-app deletion). */
 function deletionPage(body) {
@@ -1001,6 +838,24 @@ const AI_FRIENDLY = {
   AI_BAD_REQUEST: 'ORDINA AI couldn’t read that request. Try rephrasing it.',
 };
 
+/** Busy tasks sent by the phone in offline mode, reduced to what scheduling needs. */
+function clientBusyTasks(tasks) {
+  if (!Array.isArray(tasks)) return [];
+  return tasks.slice(0, 300).flatMap((task) => {
+    const dueDate = String(task?.dueDate || '');
+    const startTime = String(task?.startTime || '');
+    if (!taskValidation.isValidDateKey(dueDate) || !taskValidation.isValidTime(startTime)) return [];
+    const minutes = taskValidation.parseDurationMinutes(task?.duration ?? task?.durationMinutes);
+    return [{
+      title: String(task?.title || 'Task').slice(0, 200),
+      dueDate,
+      startTime,
+      duration: taskValidation.formatDuration(minutes && minutes >= 5 && minutes <= 1440 ? minutes : 60),
+      completed: Boolean(task?.completed),
+    }];
+  });
+}
+
 function cleanAnswers(answers) {
   return (Array.isArray(answers) ? answers : [])
     .slice(0, 5)
@@ -1035,10 +890,13 @@ app.post('/api/ai/plan', async (req, res) => {
       await prisma.user.updateMany({ where: { id: userId, NOT: { timezone } }, data: { timezone } }).catch(() => undefined);
     }
     await materializeRecurrence(userId);
-    const [existingTasks, profile] = await Promise.all([
+    // Offline mode: the phone sends its own tasks (busy times for overlap checks, recent tasks
+    // for personalization). Gemini still only receives times and habits, never these titles.
+    const [serverTasks, profile] = await Promise.all([
       ownedTasks(userId),
-      planService.refreshProfile(prisma, userId),
+      planService.refreshProfile(prisma, userId, [], req.body?.history),
     ]);
+    const existingTasks = [...serverTasks, ...clientBusyTasks(req.body?.existingTasks)];
     const plan = await planner.createPlan({
       message,
       answers: cleanAnswers(req.body?.answers),
@@ -1063,6 +921,19 @@ app.post('/api/ai/plan', async (req, res) => {
       message: AI_FRIENDLY[code] || 'Something went wrong while planning. Please try again.',
       code,
     });
+  }
+});
+
+/** Offline mode: the phone saved the plan itself; learn from the user's corrections. */
+app.post('/api/ai/plan/learn', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    return res.json(await planService.learnFromPlan(prisma, userId, { tasks: req.body?.tasks, history: req.body?.history }));
+  } catch (error) {
+    if (error.status && error.status < 500) return res.status(error.status).json({ message: error.message });
+    console.error('AI plan learn failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not update your planning preferences.' });
   }
 });
 
@@ -1289,4 +1160,6 @@ async function start() {
   });
 }
 
-start();
+if (require.main === module) start();
+
+module.exports = { app, deleteAccountData };

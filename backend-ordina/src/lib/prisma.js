@@ -3,13 +3,13 @@ require('dotenv/config');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl || !/^postgres(ql)?:\/\//i.test(databaseUrl)) {
-  throw new Error('DATABASE_URL must be a PostgreSQL connection string (Neon in production, `prisma dev` locally). See backend-ordina/.env.example');
+// PostgreSQL: Neon in production (pooled connection, host contains "-pooler"), or a local
+// `prisma dev` database during development. See .env.example.
+const connectionString = process.env.DATABASE_URL || '';
+if (!/^postgres(ql)?:\/\//i.test(connectionString)) {
+  throw new Error('DATABASE_URL must be a PostgreSQL connection string (see backend-ordina/.env.example).');
 }
 
-// Neon suspends idle databases, so allow a few seconds for the first connection to wake it.
-const adapter = new PrismaPg({ connectionString: databaseUrl, connectionTimeoutMillis: 15_000, max: 5 });
-const prisma = new PrismaClient({ adapter });
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 
 module.exports = prisma;

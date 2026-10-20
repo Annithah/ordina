@@ -14,7 +14,7 @@ export function ThemeToggle() {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={t('home.toggleTheme')}
+      accessibilityLabel={t('theme.toggle')}
       hitSlop={6}
       onPress={() => setPreference(isDark ? 'light' : 'dark')}
       style={({ pressed }) => [

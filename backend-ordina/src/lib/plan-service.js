@@ -42,7 +42,30 @@ function parseJson(text, fallback) {
 }
 
 /** Recomputes the profile from the user's recent tasks plus stored corrections, saves it, returns it. */
-async function refreshProfile(prisma, userId, addedCorrections = []) {
+/**
+ * Tasks the phone sends for personalization when tasks live on the device (offline mode).
+ * Only the fields the profile needs are kept: no ids, dates or descriptions beyond 300 chars.
+ */
+function sanitizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history.slice(0, HISTORY_LIMIT).flatMap((task) => {
+    const title = typeof task?.title === 'string' ? task.title.trim().slice(0, 200) : '';
+    if (!title) return [];
+    const minutes = Number(task.durationMinutes);
+    const duration = typeof task.duration === 'string'
+      ? task.duration.slice(0, 20)
+      : Number.isFinite(minutes) && minutes > 0 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : null;
+    return [{
+      title,
+      description: typeof task.description === 'string' ? task.description.slice(0, 300) : null,
+      startTime: typeof task.startTime === 'string' && /^\d{2}:\d{2}$/.test(task.startTime) ? task.startTime : null,
+      duration,
+      priority: ['low', 'medium', 'high'].includes(task.priority) ? task.priority : 'medium',
+    }];
+  });
+}
+
+async function refreshProfile(prisma, userId, addedCorrections = [], clientHistory = null) {
   const since = new Date(Date.now() - HISTORY_DAYS * 24 * 60 * 60 * 1000);
   const [tasks, row] = await Promise.all([
     prisma.task.findMany({
@@ -54,7 +77,8 @@ async function refreshProfile(prisma, userId, addedCorrections = []) {
     prisma.planningProfile.findUnique({ where: { userId } }),
   ]);
   const corrections = mergeCorrections(parseJson(row?.data, {}).corrections, addedCorrections);
-  const profile = { ...computeProfile(tasks, corrections), corrections };
+  const history = [...tasks, ...sanitizeHistory(clientHistory)];
+  const profile = { ...computeProfile(history, corrections), corrections };
   const data = JSON.stringify(profile);
   await prisma.planningProfile.upsert({ where: { userId }, update: { data }, create: { userId, data } });
   return profile;
@@ -146,4 +170,23 @@ async function confirmPlan(prisma, userId, { idempotencyKey, tasks }, { taskPayl
   }
 }
 
-module.exports = { TYPE_CATEGORY, confirmPlan, refreshProfile, validatePlanTasks };
+/**
+ * Offline mode: the phone saved the plan itself; record which AI suggestions the user changed
+ * so future plans follow their habits. Nothing about the tasks is stored besides the profile.
+ */
+async function learnFromPlan(prisma, userId, { tasks, history }) {
+  if (!Array.isArray(tasks) || !tasks.length) throw httpError(400, 'No tasks to learn from.');
+  const corrections = correctionsFrom(tasks.slice(0, MAX_PLAN_TASKS).map((task) => ({
+    title: String(task?.title || '').slice(0, 200),
+    description: typeof task?.description === 'string' ? task.description.slice(0, 300) : null,
+    type: task?.type,
+    startTime: typeof task?.startTime === 'string' ? task.startTime : null,
+    durationMinutes: Number.isFinite(Number(task?.durationMinutes)) ? Number(task.durationMinutes) : null,
+    priority: task?.priority ?? null,
+    original: task?.original,
+  })));
+  await refreshProfile(prisma, userId, corrections, history);
+  return { learned: corrections.length };
+}
+
+module.exports = { TYPE_CATEGORY, confirmPlan, learnFromPlan, refreshProfile, sanitizeHistory, validatePlanTasks };

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ORDINA AI",
     "slug": "ordina",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "platforms": [
       "ios",
       "android",
@@ -13,22 +13,11 @@
     "scheme": "ordina",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/images/ordina-icon.png",
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.ordina.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "splash": {
-        "image": "./assets/images/ordina-logo-transparent.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#F8FAFC",
-        "dark": {
-          "image": "./assets/images/ordina-logo-transparent-dark.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
       }
     },
     "android": {
@@ -49,17 +38,7 @@
       "blockedPermissions": [
         "android.permission.WRITE_CONTACTS",
         "android.permission.ACCESS_BACKGROUND_LOCATION"
-      ],
-      "splash": {
-        "image": "./assets/images/ordina-logo-transparent.png",
-        "resizeMode": "contain",
-        "backgroundColor": "#F8FAFC",
-        "dark": {
-          "image": "./assets/images/ordina-logo-transparent-dark.png",
-          "resizeMode": "contain",
-          "backgroundColor": "#000000"
-        }
-      }
+      ]
     },
     "web": {
       "output": "static",
@@ -119,16 +98,20 @@
           "enableBackgroundRecording": false
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-localization",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "splash": {
-      "image": "./assets/images/ordina-logo-transparent.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#F8FAFC"
-    }
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7e2f3397-4f0e-4035-9dd7-292c1ad1c2fb"
+      }
+    },
+    "owner": "anitha_dev"
   }
 }

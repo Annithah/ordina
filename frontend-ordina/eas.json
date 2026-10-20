@@ -11,8 +11,7 @@
       "distribution": "internal",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_STORE_BUILD": "1",
-        "EXPO_PUBLIC_API_URL": "https://TODO-set-render-url"
+        "EXPO_PUBLIC_STORE_BUILD": "1"
       },
       "android": {
         "buildType": "apk"
