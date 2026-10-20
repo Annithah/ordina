@@ -110,8 +110,10 @@ export function detectSchedule(text: string): DetectedSchedule | null {
 
   if (take(/\s(today)\s/i)) date = today;
   else if (take(/\s(tomorrow|tmrw|tmr)\s/i)) date = addLocalDays(today, 1);
-  else if (take(/\s(tonight)\s/i)) date = today;
-  else {
+  else if (take(/\s(tonight)\s/i)) {
+    date = today;
+    time = '20:00';
+  } else {
     const weekday = take(/\s(?:on\s+)?(next\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\s/i);
     if (weekday) {
       const target = WEEKDAYS.indexOf(weekday[2].toLowerCase());
@@ -131,8 +133,11 @@ export function detectSchedule(text: string): DetectedSchedule | null {
     if (period === 'am' && hour === 12) hour = 0;
     if (!period && hour < 7) hour += 12;
     if (hour < 24 && minute < 60) time = timeFromMinutes(hour * 60 + minute);
+  } else if (!time) {
+    if (take(/\s(?:this\s+|in the\s+)?morning\s/i)) time = '09:00';
+    else if (take(/\s(?:this\s+|in the\s+)?afternoon\s/i)) time = '14:00';
+    else if (take(/\s(?:this\s+|in the\s+)?evening\s/i)) time = '18:00';
   }
-  // "morning" / "evening" alone is not a time: the task stays Anytime (no guessed time).
 
   if (!date && !time) return null;
   const cleanTitle = rest.replace(/\s+/g, ' ').trim().replace(/[,.;-]+$/, '').trim();

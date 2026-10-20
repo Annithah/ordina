@@ -1,12 +1,11 @@
 /**
- * Account panel on the Profile tab (signed out): create account / log in, forgot password
- * (6-digit code sent by email, never shown in the app), Google and Apple as "Coming soon",
- * and "Continue without an account". Accounts are optional; they add server backup and sync.
+ * Account screen on the Profile tab: create account / log in, plus Google, Apple and email.
+ * Design only for now: forms are validated, but nothing is saved or sent. Every sign-in
+ * action shows "Coming soon" until accounts are connected.
  */
 import Ionicons from '@expo/vector-icons/Ionicons';
-import * as WebBrowser from 'expo-web-browser';
 import { useState, type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { AuthField } from '@/components/auth-field';
@@ -14,34 +13,27 @@ import { OrdinaMark } from '@/components/ordina-mark';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
-import { useI18n } from '@/providers/i18n-provider';
 import { useAppTheme } from '@/providers/theme-provider';
-import { API_BASE_URL } from '@/services/api';
-import { useAuthStore } from '@/store/auth-store';
-import { friendlyError } from '@/utils/task-validation';
 
+const COMING_SOON = 'Coming soon — sign-in will be available in the next update.';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const PASSWORD_MIN = 8;
-const GOOGLE_SIGNUP_URL = 'https://accounts.google.com/signup';
 
-type Mode = 'create' | 'login' | 'forgot' | 'reset';
-type Fields = { name: string; email: string; password: string; confirm: string; code: string };
-type Errors = Partial<Record<keyof Fields | 'form', string>>;
+type Mode = 'create' | 'login';
+type Fields = { name: string; email: string; password: string; confirm: string };
+type Errors = Partial<Record<keyof Fields, string>>;
 
-/** Field checks with error keys (translated by the caller). Exported for tests and reuse. */
-export function validateAccountForm(mode: Mode, fields: Fields): Partial<Record<keyof Fields, string>> {
-  const errors: Partial<Record<keyof Fields, string>> = {};
-  if (mode === 'create' && !fields.name.trim()) errors.name = 'account.nameRequired';
-  if (!fields.email.trim()) errors.email = 'account.emailRequired';
-  else if (!EMAIL_RE.test(fields.email.trim())) errors.email = 'account.emailInvalid';
-  if (mode === 'login' && !fields.password) errors.password = 'account.passwordRequired';
-  if (mode === 'create' || mode === 'reset') {
-    if (!fields.password) errors.password = 'account.passwordRequired';
-    else if (fields.password.length < PASSWORD_MIN) errors.password = 'account.passwordShort';
-    if (!fields.confirm) errors.confirm = 'account.confirmRequired';
-    else if (fields.confirm !== fields.password) errors.confirm = 'account.mismatch';
+export function validateAccountForm(mode: Mode, fields: Fields): Errors {
+  const errors: Errors = {};
+  if (mode === 'create' && !fields.name.trim()) errors.name = 'Please enter your full name.';
+  if (!fields.email.trim()) errors.email = 'Please enter your email.';
+  else if (!EMAIL_RE.test(fields.email.trim())) errors.email = 'Please enter a valid email address.';
+  if (!fields.password) errors.password = 'Please enter a password.';
+  else if (mode === 'create' && fields.password.length < PASSWORD_MIN) errors.password = `Use at least ${PASSWORD_MIN} characters.`;
+  if (mode === 'create') {
+    if (!fields.confirm) errors.confirm = 'Please confirm your password.';
+    else if (fields.confirm !== fields.password) errors.confirm = 'Passwords do not match.';
   }
-  if (mode === 'reset' && !/^\d{6}$/.test(fields.code.trim())) errors.code = 'account.codeInvalid';
   return errors;
 }
 
@@ -57,231 +49,190 @@ function GoogleG({ size = 18 }: { size?: number }) {
   );
 }
 
-function ProviderButton({ label, onPress, background, border, color, icon, badge }: {
-  label: string; onPress: () => void; background: string; border: string; color: string; icon: ReactNode; badge: string;
+function ProviderButton({ label, onPress, background, border, color, icon }: {
+  label: string; onPress: () => void; background: string; border: string; color: string; icon: ReactNode;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${label}, ${badge}`}
+      accessibilityLabel={label}
       onPress={onPress}
       style={({ pressed }) => [styles.provider, { backgroundColor: background, borderColor: border, opacity: pressed ? 0.85 : 1 }]}>
       <View style={styles.providerIcon}>{icon}</View>
       <ThemedText style={[styles.providerText, { color }]} numberOfLines={1}>{label}</ThemedText>
-      <ThemedText style={[styles.badge, { color, borderColor: border }]}>{badge}</ThemedText>
+      <View style={styles.providerIcon} />
     </Pressable>
   );
 }
 
 export function AccountPanel({ onSkip }: { onSkip: () => void }) {
   const theme = useTheme();
-  const { t } = useI18n();
   const { scheme } = useAppTheme();
   const dark = scheme === 'dark';
-  const { signIn, signUp, requestPasswordReset, resetPassword } = useAuthStore();
   const [mode, setMode] = useState<Mode>('create');
-  const [fields, setFields] = useState<Fields>({ name: '', email: '', password: '', confirm: '', code: '' });
+  const [fields, setFields] = useState<Fields>({ name: '', email: '', password: '', confirm: '' });
   const [errors, setErrors] = useState<Errors>({});
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  const serverReady = Boolean(API_BASE_URL);
 
   const set = (key: keyof Fields) => (value: string) => {
     setFields((current) => ({ ...current, [key]: value }));
-    if (errors[key] || errors.form) setErrors(({ [key]: _cleared, form: _form, ...rest }) => rest);
+    if (errors[key]) setErrors(({ [key]: _cleared, ...rest }) => rest);
   };
 
   function switchMode(next: Mode) {
     setMode(next);
     setErrors({});
-    setNotice(null);
-    setFields((current) => ({ ...current, password: '', confirm: '', code: '' }));
   }
 
-  async function submit() {
-    if (busy) return;
+  function submit() {
     const found = validateAccountForm(mode, fields);
-    const translated: Errors = Object.fromEntries(Object.entries(found).map(([key, value]) => [key, t(value as string)]));
-    setErrors(translated);
+    setErrors(found);
     if (Object.keys(found).length) return;
-    if (!serverReady) {
-      setErrors({ form: t('account.serverNotConnected') });
-      return;
-    }
-    setBusy(true);
-    try {
-      if (mode === 'create') {
-        await signUp({ name: fields.name, email: fields.email, password: fields.password });
-        toast.success(t('account.created'));
-      } else if (mode === 'login') {
-        await signIn({ email: fields.email, password: fields.password });
-        toast.success(t('account.welcomeBack'));
-      } else if (mode === 'forgot') {
-        await requestPasswordReset(fields.email);
-        setMode('reset');
-        setNotice(t('account.codeSent', { email: fields.email.trim() }));
-      } else {
-        await resetPassword({ email: fields.email, code: fields.code, password: fields.password });
-        switchMode('login');
-        setNotice(t('account.resetDone'));
-      }
-    } catch (error) {
-      const err = error as { response?: unknown };
-      setErrors({ form: err && !err.response ? t('account.serverNotConnected') : friendlyError(error, t('errors.generic')) });
-    } finally {
-      setBusy(false);
-    }
+    toast.info(COMING_SOON);
   }
 
-  const soon = (provider: string) => toast.info(t('account.providerSoon', { provider }));
-  const submitLabel = mode === 'create' ? t('account.create') : mode === 'login' ? t('account.login') : mode === 'forgot' ? t('account.sendCode') : t('account.resetButton');
+  const comingSoon = () => toast.info(COMING_SOON);
 
   return (
     <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.brand}>
         <OrdinaMark size={56} color={theme.primary} />
-        <ThemedText themeColor="textSecondary" style={styles.headline}>{t('account.headline')}</ThemedText>
+        <ThemedText style={styles.welcome}>Welcome to ORDINA</ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.welcomeSub}>
+          Create an account to keep your plan safe across phones.
+        </ThemedText>
       </View>
 
-      {mode === 'create' || mode === 'login' ? (
-        <View accessibilityRole="tablist" style={[styles.tabs, { backgroundColor: theme.backgroundElement }]}>
-          {(['create', 'login'] as const).map((id) => {
-            const active = mode === id;
-            return (
-              <Pressable
-                key={id}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: active }}
-                onPress={() => switchMode(id)}
-                style={[styles.tab, active && { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <ThemedText style={[styles.tabText, { color: active ? theme.primary : theme.textSecondary }]}>{id === 'create' ? t('account.create') : t('account.login')}</ThemedText>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : (
-        <View style={{ gap: 4 }}>
-          <ThemedText style={styles.formTitle} accessibilityRole="header">{t('account.forgotTitle')}</ThemedText>
-          {mode === 'forgot' ? <ThemedText themeColor="textSecondary" style={styles.small}>{t('account.forgotBody')}</ThemedText> : null}
-        </View>
-      )}
-
-      {notice ? (
-        <View accessibilityRole="alert" style={[styles.notice, { backgroundColor: theme.backgroundSelected }]}>
-          <Ionicons name="mail-outline" size={16} color={theme.primary} />
-          <ThemedText style={[styles.small, { flex: 1, color: theme.primary }]}>{notice}</ThemedText>
-        </View>
-      ) : null}
+      <View accessibilityRole="tablist" style={[styles.tabs, { backgroundColor: theme.backgroundElement }]}>
+        {([['create', 'Create account'], ['login', 'Log in']] as const).map(([id, label]) => {
+          const active = mode === id;
+          return (
+            <Pressable
+              key={id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              onPress={() => switchMode(id)}
+              style={[styles.tab, active && { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <ThemedText style={[styles.tabText, { color: active ? theme.primary : theme.textSecondary }]}>{label}</ThemedText>
+            </Pressable>
+          );
+        })}
+      </View>
 
       <View style={styles.form}>
         {mode === 'create' ? (
-          <AuthField label={t('account.fullName')} value={fields.name} onChangeText={set('name')} placeholder={t('account.namePlaceholder')} autoComplete="name" textContentType="name" autoCapitalize="words" error={errors.name} />
+          <AuthField
+            label="Full name"
+            value={fields.name}
+            onChangeText={set('name')}
+            placeholder="Your name"
+            autoComplete="name"
+            textContentType="name"
+            autoCapitalize="words"
+            error={errors.name}
+          />
         ) : null}
         <AuthField
-          label={t('account.email')}
+          label="Email"
           value={fields.email}
           onChangeText={set('email')}
-          placeholder={t('account.emailPlaceholder')}
+          placeholder="you@example.com"
           autoComplete="email"
           textContentType="emailAddress"
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
-          editable={mode !== 'reset'}
           error={errors.email}
         />
-        {mode === 'reset' ? (
-          <AuthField label={t('account.code')} value={fields.code} onChangeText={set('code')} placeholder={t('account.codePlaceholder')} keyboardType="number-pad" maxLength={6} autoComplete="one-time-code" textContentType="oneTimeCode" error={errors.code} />
-        ) : null}
-        {mode !== 'forgot' ? (
+        <AuthField
+          label="Password"
+          value={fields.password}
+          onChangeText={set('password')}
+          placeholder={mode === 'create' ? `At least ${PASSWORD_MIN} characters` : 'Your password'}
+          autoComplete={mode === 'create' ? 'new-password' : 'current-password'}
+          textContentType={mode === 'create' ? 'newPassword' : 'password'}
+          autoCapitalize="none"
+          isPassword
+          error={errors.password}
+        />
+        {mode === 'create' ? (
           <AuthField
-            label={mode === 'reset' ? t('account.newPassword') : t('account.password')}
-            value={fields.password}
-            onChangeText={set('password')}
-            placeholder={mode === 'login' ? t('account.passwordPlaceholder') : t('account.newPasswordPlaceholder')}
-            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            textContentType={mode === 'login' ? 'password' : 'newPassword'}
+            label="Confirm password"
+            value={fields.confirm}
+            onChangeText={set('confirm')}
+            placeholder="Type it again"
+            autoComplete="new-password"
+            textContentType="newPassword"
             autoCapitalize="none"
             isPassword
-            error={errors.password}
+            error={errors.confirm}
           />
-        ) : null}
-        {mode === 'create' || mode === 'reset' ? (
-          <AuthField label={t('account.confirm')} value={fields.confirm} onChangeText={set('confirm')} placeholder={t('account.confirmPlaceholder')} autoComplete="new-password" textContentType="newPassword" autoCapitalize="none" isPassword error={errors.confirm} />
-        ) : null}
-        {mode === 'login' ? (
-          <Pressable accessibilityRole="link" onPress={() => switchMode('forgot')} hitSlop={8} style={styles.forgot}>
-            <ThemedText style={[styles.link, { color: theme.primary }]}>{t('account.forgot')}</ThemedText>
+        ) : (
+          <Pressable accessibilityRole="link" onPress={comingSoon} hitSlop={8} style={styles.forgot}>
+            <ThemedText style={[styles.link, { color: theme.primary }]}>Forgot password?</ThemedText>
           </Pressable>
-        ) : null}
-        {errors.form ? <ThemedText accessibilityRole="alert" style={[styles.small, { color: theme.danger }]}>{errors.form}</ThemedText> : null}
+        )}
         <Pressable
           accessibilityRole="button"
-          accessibilityState={{ busy }}
-          disabled={busy}
-          onPress={() => void submit()}
-          style={({ pressed }) => [styles.submit, { backgroundColor: theme.primary, opacity: busy ? 0.7 : pressed ? 0.85 : 1 }]}>
-          {busy ? <ActivityIndicator color="#FFFFFF" /> : <ThemedText style={styles.submitText}>{submitLabel}</ThemedText>}
+          onPress={submit}
+          style={({ pressed }) => [styles.submit, { backgroundColor: theme.primary, opacity: pressed ? 0.85 : 1 }]}>
+          <ThemedText style={styles.submitText}>{mode === 'create' ? 'Create account' : 'Log in'}</ThemedText>
         </Pressable>
-        {mode === 'forgot' || mode === 'reset' ? (
-          <Pressable accessibilityRole="button" onPress={() => switchMode('login')} hitSlop={8} style={styles.forgotCenter}>
-            <ThemedText style={[styles.link, { color: theme.primary }]}>{t('account.backToLogin')}</ThemedText>
-          </Pressable>
-        ) : null}
       </View>
 
-      {mode === 'create' || mode === 'login' ? (
-        <>
-          <View style={styles.divider}>
-            <View style={[styles.line, { backgroundColor: theme.border }]} />
-            <ThemedText themeColor="textSecondary" style={styles.dividerText}>{t('account.or')}</ThemedText>
-            <View style={[styles.line, { backgroundColor: theme.border }]} />
-          </View>
-          <View style={styles.providers}>
-            {/* Google sign-in branding: light #FFFFFF / #747775 / #1F1F1F, dark #131314 / #8E918F / #E3E3E3. */}
-            <ProviderButton
-              label={t('account.google')}
-              badge={t('common.comingSoon')}
-              onPress={() => soon('Google')}
-              background={dark ? '#131314' : '#FFFFFF'}
-              border={dark ? '#8E918F' : '#747775'}
-              color={dark ? '#E3E3E3' : '#1F1F1F'}
-              icon={<GoogleG />}
-            />
-            {/* Sign in with Apple: black button on light backgrounds, white on dark. */}
-            <ProviderButton
-              label={t('account.apple')}
-              badge={t('common.comingSoon')}
-              onPress={() => soon('Apple')}
-              background={dark ? '#FFFFFF' : '#000000'}
-              border={dark ? '#FFFFFF' : '#000000'}
-              color={dark ? '#000000' : '#FFFFFF'}
-              icon={<Ionicons name="logo-apple" size={20} color={dark ? '#000000' : '#FFFFFF'} />}
-            />
-          </View>
-          <Pressable accessibilityRole="link" onPress={() => void WebBrowser.openBrowserAsync(GOOGLE_SIGNUP_URL).catch(() => undefined)} hitSlop={6} style={styles.forgotCenter}>
-            <ThemedText style={[styles.link, { color: theme.primary, textAlign: 'center' }]}>{t('account.noEmail')}</ThemedText>
-          </Pressable>
-        </>
-      ) : null}
+      <View style={styles.divider}>
+        <View style={[styles.line, { backgroundColor: theme.border }]} />
+        <ThemedText themeColor="textSecondary" style={styles.dividerText}>or continue with</ThemedText>
+        <View style={[styles.line, { backgroundColor: theme.border }]} />
+      </View>
+
+      <View style={styles.providers}>
+        {/* Google sign-in branding: light #FFFFFF / #747775 / #1F1F1F, dark #131314 / #8E918F / #E3E3E3. */}
+        <ProviderButton
+          label="Continue with Google"
+          onPress={comingSoon}
+          background={dark ? '#131314' : '#FFFFFF'}
+          border={dark ? '#8E918F' : '#747775'}
+          color={dark ? '#E3E3E3' : '#1F1F1F'}
+          icon={<GoogleG />}
+        />
+        {/* Sign in with Apple: black button on light backgrounds, white on dark. */}
+        <ProviderButton
+          label="Continue with Apple"
+          onPress={comingSoon}
+          background={dark ? '#FFFFFF' : '#000000'}
+          border={dark ? '#FFFFFF' : '#000000'}
+          color={dark ? '#000000' : '#FFFFFF'}
+          icon={<Ionicons name="logo-apple" size={20} color={dark ? '#000000' : '#FFFFFF'} />}
+        />
+        <ProviderButton
+          label="Continue with email"
+          onPress={comingSoon}
+          background={theme.card}
+          border={theme.border}
+          color={theme.text}
+          icon={<Ionicons name="mail-outline" size={20} color={theme.primary} />}
+        />
+      </View>
 
       <Pressable accessibilityRole="button" onPress={onSkip} hitSlop={8} style={styles.skip}>
-        <ThemedText themeColor="textSecondary" style={styles.skipText}>{t('account.skip')}</ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.skipText}>Continue without an account</ThemedText>
       </Pressable>
     </View>
   );
 }
 
-/** Small card shown after "Continue without an account", to open the account panel again. */
+/** Small card shown after "Continue without an account", to open the account screen again. */
 export function AccountPrompt({ onOpen }: { onOpen: () => void }) {
   const theme = useTheme();
-  const { t } = useI18n();
   return (
-    <Pressable accessibilityRole="button" onPress={onOpen} style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
+    <Pressable
+      accessibilityRole="button"
+      onPress={onOpen}
+      style={[styles.prompt, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <OrdinaMark size={36} color={theme.primary} />
       <View style={{ flex: 1 }}>
-        <ThemedText style={styles.promptTitle}>{t('account.usingWithout')}</ThemedText>
-        <ThemedText themeColor="textSecondary" style={styles.promptSub}>{t('account.usingWithoutHint')}</ThemedText>
+        <ThemedText style={styles.promptTitle}>Using ORDINA without an account</ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.promptSub}>Your tasks stay on this phone. Tap to create an account or log in.</ThemedText>
       </View>
       <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
     </Pressable>
@@ -290,17 +241,14 @@ export function AccountPrompt({ onOpen }: { onOpen: () => void }) {
 
 const styles = StyleSheet.create({
   card: { borderWidth: 1, borderRadius: 20, padding: 18, gap: 18 },
-  brand: { alignItems: 'center', gap: 8 },
-  headline: { fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 320 },
+  brand: { alignItems: 'center', gap: 4 },
+  welcome: { fontSize: 20, fontFamily: 'Poppins_700Bold', marginTop: 6, textAlign: 'center' },
+  welcomeSub: { fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 320 },
   tabs: { flexDirection: 'row', borderRadius: 14, padding: 4, gap: 4 },
   tab: { flex: 1, minHeight: 44, borderRadius: 11, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'transparent' },
   tabText: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
-  formTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
-  small: { fontSize: 13, lineHeight: 19 },
-  notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderRadius: 12, padding: 10 },
   form: { gap: 14 },
   forgot: { alignSelf: 'flex-end', minHeight: 32, justifyContent: 'center' },
-  forgotCenter: { alignSelf: 'center', minHeight: 40, justifyContent: 'center', paddingHorizontal: 8 },
   link: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   submit: { minHeight: 52, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   submitText: { color: '#FFFFFF', fontSize: 16, fontFamily: 'Poppins_700Bold' },
@@ -308,11 +256,10 @@ const styles = StyleSheet.create({
   line: { flex: 1, height: StyleSheet.hairlineWidth },
   dividerText: { fontSize: 12 },
   providers: { gap: 10 },
-  provider: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: 24, borderWidth: 1, paddingHorizontal: 14, gap: 8 },
+  provider: { flexDirection: 'row', alignItems: 'center', minHeight: 48, borderRadius: 24, borderWidth: 1, paddingHorizontal: 14 },
   providerIcon: { width: 24, alignItems: 'center' },
   providerText: { flex: 1, textAlign: 'center', fontSize: 15, fontFamily: 'Poppins_500Medium' },
-  badge: { fontSize: 10, fontFamily: 'Poppins_600SemiBold', borderWidth: 1, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1, overflow: 'hidden' },
-  skip: { alignSelf: 'center', minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  skip: { alignSelf: 'center', minHeight: 40, justifyContent: 'center', paddingHorizontal: 8 },
   skipText: { fontSize: 13, textDecorationLine: 'underline' },
   prompt: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, padding: 14 },
   promptTitle: { fontSize: 15, fontFamily: 'Poppins_600SemiBold' },

@@ -7,10 +7,9 @@ services:
     plan: free
     region: ohio # same AWS region as the Neon project (us-east-2)
     rootDir: backend-ordina
-    # Version 2 lives on this branch until it is merged into frontend-ordina-001.
-    branch: feature/v1-tasks-ai
+    branch: frontend-ordina-001
     buildCommand: npm ci
-    # Applies database migrations (additive only), then starts the server.
+    # Applies database migrations, then starts the server.
     startCommand: npm run start:prod
     healthCheckPath: /health
     autoDeploy: true
@@ -29,7 +28,3 @@ services:
         sync: false # entered in the Render dashboard
       - key: GEMINI_MODEL
         value: gemini-3.8-flash
-      - key: RESEND_API_KEY
-        sync: false # optional: password-reset emails (resend.com, free plan)
-      - key: MAIL_FROM
-        sync: false # optional: e.g. "ORDINA <no-reply@your-domain>" (a domain verified in Resend)

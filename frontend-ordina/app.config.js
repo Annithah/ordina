@@ -2,17 +2,16 @@
  * Expo config. app.json holds the base settings; this file adjusts them for the
  * Google Play build (EAS profiles "production" and "preview" set EXPO_PUBLIC_STORE_BUILD=1).
  *
- * The store build ships Daily Task Planning, local reminders, backup/sync and ORDINA AI (with
- * optional voice), so it drops the native plugins and Android permissions of features that are
- * switched off in src/config/release.ts. It keeps the microphone (asked when the mic is first
- * used) and notifications (asked when the user first turns on a reminder).
+ * The store build ships only Daily Task Planning + ORDINA AI (with optional voice), so it
+ * drops the native plugins and Android permissions of features that are switched off in
+ * src/config/release.ts. Only the microphone remains, requested when the mic is first used.
  */
 
 const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
-// Test build whose server is the developer's laptop over plain http (Wi-Fi), not the HTTPS server.
-const LAPTOP_SERVER = /^http:\/\//i.test(process.env.EXPO_PUBLIC_API_URL || '');
+// Offline test build: tasks on the phone, ORDINA AI on the developer's laptop over http.
+const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
 
-/** Allows plain-http requests (laptop on the local Wi-Fi). Used only when the server is a laptop. */
+/** Allows plain-http requests (laptop on the local Wi-Fi). Used only by the offline test build. */
 function withCleartextTraffic(config) {
   const { withAndroidManifest } = require('expo/config-plugins');
   return withAndroidManifest(config, (mod) => {
@@ -27,6 +26,7 @@ const STORE_EXCLUDED_PLUGINS = new Set([
   'expo-contacts',
   'expo-location',
   'expo-image-picker',
+  'expo-notifications',
   'expo-apple-authentication',
 ]);
 
@@ -38,7 +38,10 @@ const STORE_BLOCKED_PERMISSIONS = [
   'android.permission.ACCESS_COARSE_LOCATION',
   'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.ACCESS_BACKGROUND_LOCATION',
+  'android.permission.POST_NOTIFICATIONS',
+  'android.permission.SCHEDULE_EXACT_ALARM',
   'android.permission.USE_EXACT_ALARM',
+  'android.permission.RECEIVE_BOOT_COMPLETED',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
   'android.permission.READ_MEDIA_IMAGES',
@@ -71,13 +74,11 @@ module.exports = ({ config }) => {
 
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || '';
   // ORDINA_LOCAL_STORE_PREVIEW=1 lets a developer preview the store scope with `expo start`
-  // against a local backend. A laptop test server must be a plain http address on the Wi-Fi.
-  if (LAPTOP_SERVER && !/^http:\/\/[\w.-]+(:\d+)?\/?$/i.test(apiUrl)) {
-    throw new Error(`Laptop test server must look like http://192.168.1.20:4000 (got "${apiUrl}").`);
+  // against a local backend. The offline test build (LOCAL_MODE) uses the laptop's Wi-Fi address.
+  if (LOCAL_MODE && !/^http:\/\/[\w.-]+(:\d+)?\/?$/i.test(apiUrl)) {
+    throw new Error(`Offline test build needs EXPO_PUBLIC_API_URL set to the laptop address, e.g. http://192.168.1.20:4000 (got "${apiUrl}").`);
   }
-  // An empty address is allowed on purpose: a test build before the server is deployed. The app
-  // then works offline and shows "Server not connected yet" for accounts and ORDINA AI.
-  if (apiUrl && !LAPTOP_SERVER && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
+  if (!LOCAL_MODE && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
     throw new Error(`Store build needs EXPO_PUBLIC_API_URL set to the HTTPS production backend (got "${apiUrl}").`);
   }
 
@@ -87,14 +88,9 @@ module.exports = ({ config }) => {
     plugins: (config.plugins ?? []).filter((plugin) => !STORE_EXCLUDED_PLUGINS.has(pluginName(plugin))),
     android: {
       ...config.android,
-      permissions: [
-        'android.permission.RECORD_AUDIO',
-        'android.permission.POST_NOTIFICATIONS',
-        'android.permission.RECEIVE_BOOT_COMPLETED',
-        'android.permission.SCHEDULE_EXACT_ALARM',
-      ],
+      permissions: ['android.permission.RECORD_AUDIO'],
       blockedPermissions: [...blocked],
     },
   };
-  return LAPTOP_SERVER ? withCleartextTraffic(result) : result;
+  return LOCAL_MODE ? withCleartextTraffic(result) : result;
 };

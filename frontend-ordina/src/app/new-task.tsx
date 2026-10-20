@@ -1,10 +1,3 @@
-/**
- * New / edit task. When: a day, then "Anytime" or a time from the native picker. Duration:
- * 15 min / 30 min / 1 h / 2 h, a custom value (5 min - 12 h) or none. One category per task
- * (suggested from the title for new tasks). Reminder: none, at start, 5/15/30 min, 1 hour,
- * 1 day before, or a custom time (Anytime tasks: a time the user picks).
- * Writing several activities in the title opens a preview that splits them into tasks.
- */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import * as Crypto from 'expo-crypto';
@@ -12,6 +5,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -23,64 +17,89 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Chip, type IconName } from '@/components/chip';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { ContactActions } from '@/components/contact-actions';
 import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
-import { useReminderPermission } from '@/components/reminder-permission';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { useCategories } from '@/hooks/use-categories';
 import { useTheme } from '@/hooks/use-theme';
-import { formatDay, formatDuration, formatMoment, formatTime } from '@/i18n/format';
+import { cancelTaskReminder, scheduleTaskReminder } from '@/services/notifications';
+import { useAuthStore } from '@/store/auth-store';
+import { useTasksStore, type Category, type Priority, type Task } from '@/store/tasks-store';
+import { addLocalDays, localDateKey } from '@/utils/dates';
+import {
+  detectSchedule,
+  durationToMinutes,
+  findClashes,
+  findFreeSlot,
+  formatDuration,
+  formatTime12,
+  friendlyDay,
+  minutesFromTime,
+  minutesToDuration,
+  plannedMinutes,
+  timeFromMinutes,
+} from '@/utils/task-planning';
+import { DESCRIPTION_MAX, TITLE_MAX, friendlyError, validateTaskForm, type TaskFieldErrors } from '@/utils/task-validation';
+import { FEATURES, LOCAL_MODE } from '@/config/release';
 import { isTimeOver, parsedToDrafts } from '@/features/tasks/parsed-drafts';
 import { PARSED_TITLE_MAX, PLAN_INPUT_MAX, parseTasks } from '@/features/tasks/parseTasks';
-import { suggestCategoryId } from '@/logic/categories';
-import { ANYTIME_REMINDER_OPTIONS, TIMED_REMINDER_OPTIONS, localDateTime, reminderTime, type ReminderOption } from '@/logic/reminders';
-import {
-  DURATION_MAX,
-  DURATION_MIN,
-  DURATION_PRESETS,
-  durationMinutes,
-  durationValue,
-  findOverlaps,
-  isValidCustomDuration,
-  minutesOf,
-  span,
-  timeOf,
-} from '@/logic/schedule';
-import { useI18n } from '@/providers/i18n-provider';
+import { confirmPlan } from '@/services/ai';
 import { confirmLocalPlan } from '@/services/local-tasks';
-import { useSettingsStore } from '@/store/settings-store';
-import { useTasksStore, type Priority, type Task } from '@/store/tasks-store';
 import type { DraftTask } from '@/types/plan';
-import { addLocalDays, localDateKey } from '@/utils/dates';
 import { toConfirmPayload } from '@/utils/plan-draft';
-import { detectSchedule, findFreeSlot } from '@/utils/task-planning';
-import { DESCRIPTION_MAX, TITLE_MAX, friendlyError, validateTaskForm, type TaskFieldErrors } from '@/utils/task-validation';
 
-const PRIORITY_COLORS: Record<Priority, string> = { low: '#3B82F6', medium: '#F59E0B', high: '#EF4444' };
-const REMINDER_KEY: Record<ReminderOption, string> = {
-  none: 'reminders.none',
-  start: 'reminders.start',
-  '5': 'reminders.min5',
-  '15': 'reminders.min15',
-  '30': 'reminders.min30',
-  '60': 'reminders.hour1',
-  '1440': 'reminders.day1',
-  custom: 'reminders.custom',
-};
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const CATEGORIES: { id: Category; label: string; icon: IconName; color: string }[] = [
+  { id: 'work', label: 'Work', icon: 'briefcase-outline', color: '#5C4DF2' },
+  { id: 'personal', label: 'Personal', icon: 'person-outline', color: '#F59E0B' },
+  { id: 'health', label: 'Health', icon: 'fitness-outline', color: '#22C55E' },
+  { id: 'learning', label: 'Learning', icon: 'school-outline', color: '#3B82F6' },
+  { id: 'design', label: 'Creative', icon: 'color-palette-outline', color: '#EC4899' },
+  { id: 'database', label: 'Errands', icon: 'cart-outline', color: '#06B6D4' },
+];
+
+const PRIORITIES: { id: Priority; label: string; color: string }[] = [
+  { id: 'low', label: 'Low', color: '#3B82F6' },
+  { id: 'medium', label: 'Medium', color: '#F59E0B' },
+  { id: 'high', label: 'High', color: '#EF4444' },
+];
+
+// The date/time picker is native-only; the web build keeps the preset chips.
 const HAS_NATIVE_PICKER = Platform.OS === 'android' || Platform.OS === 'ios';
 
-const pad = (n: number) => String(n).padStart(2, '0');
+const DURATIONS = [15, 30, 45, 60, 90, 120, 180];
 
-function dateAt(key: string, time?: string | null) {
+const REPEATS: { id: string; label: string; recurrence: NonNullable<Task['recurrence']>; rule?: string }[] = [
+  { id: 'none', label: 'Never', recurrence: 'none' },
+  { id: 'daily', label: 'Every day', recurrence: 'daily' },
+  { id: 'weekdays', label: 'Weekdays', recurrence: 'custom', rule: '1,2,3,4,5' },
+  { id: 'weekly', label: 'Weekly', recurrence: 'weekly' },
+  { id: 'monthly', label: 'Monthly', recurrence: 'monthly' },
+];
+
+const REMINDERS: { minutes: number | null; label: string }[] = [
+  { minutes: null, label: 'Off' },
+  { minutes: 0, label: 'At start' },
+  { minutes: 10, label: '10 min before' },
+  { minutes: 30, label: '30 min before' },
+  { minutes: 60, label: '1 hour before' },
+  { minutes: 1440, label: '1 day before' },
+];
+
+function dateFromKey(key: string, time?: string) {
   const [y, m, d] = key.split('-').map(Number);
-  const minutes = minutesOf(time) ?? 9 * 60;
+  const minutes = minutesFromTime(time) ?? 9 * 60;
   return new Date(y, m - 1, d, Math.floor(minutes / 60), minutes % 60);
 }
 
-const toLocalDateTime = (date: Date) => `${localDateKey(date)}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+function nextWeekday(day: number) {
+  const today = new Date();
+  const delta = (day - today.getDay() + 7) % 7 || 7;
+  return addLocalDays(localDateKey(today), delta);
+}
 
 function Section({ icon, title, children, right }: { icon: IconName; title: string; children: ReactNode; right?: ReactNode }) {
   const theme = useTheme();
@@ -88,7 +107,7 @@ function Section({ icon, title, children, right }: { icon: IconName; title: stri
     <View style={[styles.section, { backgroundColor: theme.card, borderColor: theme.border }]}>
       <View style={styles.sectionHead}>
         <Ionicons name={icon} size={16} color={theme.primary} />
-        <ThemedText style={styles.sectionTitle} accessibilityRole="header">{title}</ThemedText>
+        <ThemedText style={styles.sectionTitle}>{title}</ThemedText>
         {right}
       </View>
       {children}
@@ -96,20 +115,46 @@ function Section({ icon, title, children, right }: { icon: IconName; title: stri
   );
 }
 
+function Chip({ label, active, onPress, color, icon }: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  color?: string;
+  icon?: IconName;
+}) {
+  const theme = useTheme();
+  const tint = color ?? theme.primary;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.chip,
+        {
+          borderColor: active ? tint : theme.border,
+          backgroundColor: active ? `${tint}1F` : 'transparent',
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}>
+      {icon ? <Ionicons name={icon} size={14} color={active ? tint : theme.textSecondary} /> : null}
+      <ThemedText style={[styles.chipText, { color: active ? tint : theme.text }]}>{label}</ThemedText>
+    </Pressable>
+  );
+}
+
 export default function NewTaskScreen() {
   const theme = useTheme();
-  const { t } = useI18n();
-  const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string; title?: string }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string }>();
   const presetDate = typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : undefined;
   const presetTime = typeof params.time === 'string' && /^\d{2}:\d{2}$/.test(params.time) ? params.time : undefined;
-  const presetTitle = typeof params.title === 'string' ? params.title.slice(0, PLAN_INPUT_MAX) : undefined;
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
   const tasks = useTasksStore((s) => s.tasks);
   const loadTasks = useTasksStore((s) => s.loadTasks);
   const taskToEdit = useMemo(() => tasks.find((task) => task.id === taskId), [tasks, taskId]);
   const [lookupDone, setLookupDone] = useState(false);
 
-  // Opened directly (e.g. from a notification after a restart): load before deciding it is missing.
+  // Opened directly (e.g. after a restart): fetch the list before deciding the task is missing.
   useEffect(() => {
     if (!taskId || taskToEdit) return;
     let alive = true;
@@ -126,10 +171,10 @@ export default function NewTaskScreen() {
       <SafeAreaView style={[styles.safe, styles.center, { backgroundColor: theme.background }]}>
         {lookupDone ? (
           <>
-            <ThemedText style={styles.headerTitle}>{t('task.notFound')}</ThemedText>
-            <ThemedText themeColor="textSecondary">{t('task.notFoundHint')}</ThemedText>
+            <ThemedText style={styles.headerTitle}>Task not found</ThemedText>
+            <ThemedText themeColor="textSecondary">It may have been deleted.</ThemedText>
             <View style={{ width: 220 }}>
-              <PrimaryButton label={t('task.backToTasks')} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+              <PrimaryButton label="Back to tasks" onPress={() => router.back()} />
             </View>
           </>
         ) : (
@@ -138,78 +183,67 @@ export default function NewTaskScreen() {
       </SafeAreaView>
     );
   }
-  return <TaskForm key={taskToEdit?.id ?? 'new'} taskToEdit={taskToEdit} presetDate={presetDate} presetTime={presetTime} presetTitle={presetTitle} />;
+  return <TaskForm key={taskToEdit?.id ?? 'new'} taskToEdit={taskToEdit} presetDate={presetDate} presetTime={presetTime} />;
 }
 
-function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToEdit?: Task; presetDate?: string; presetTime?: string; presetTitle?: string }) {
+function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; presetDate?: string; presetTime?: string }) {
   const theme = useTheme();
-  const { t, locale } = useI18n();
+  const isSignedIn = useAuthStore((s) => s.isSignedIn);
   const { tasks, addTask, updateTask, deleteTask, loadTasks } = useTasksStore();
-  const { categories, find, nameOf } = useCategories();
-  const settings = useSettingsStore();
-  const permission = useReminderPermission();
   const isEditMode = Boolean(taskToEdit);
-  const today = localDateKey();
 
-  const initialCategory = taskToEdit?.categoryId
-    ?? (categories.some((category) => category.id === settings.defaultCategoryId) ? settings.defaultCategoryId : find(null).id);
-  const initialTime = taskToEdit ? taskToEdit.startTime ?? '' : presetTime ?? '';
-
-  const [title, setTitle] = useState(taskToEdit?.title ?? presetTitle ?? '');
+  const [title, setTitle] = useState(taskToEdit?.title ?? '');
   const [notes, setNotes] = useState(taskToEdit?.description ?? '');
   const [priority, setPriority] = useState<Priority>(taskToEdit?.priority ?? 'medium');
-  const [categoryId, setCategoryId] = useState(initialCategory);
-  const [categoryTouched, setCategoryTouched] = useState(isEditMode);
-  const [dueDate, setDueDate] = useState(taskToEdit?.dueDate ?? presetDate ?? today);
-  const [startTime, setStartTime] = useState(initialTime);
-  const [minutes, setMinutes] = useState<number | null>(taskToEdit ? durationMinutes(taskToEdit.duration) : settings.defaultDuration);
-  const [reminder, setReminder] = useState<ReminderOption>(
-    taskToEdit?.reminder ?? (settings.remindersEnabled && initialTime ? settings.defaultReminder : 'none'),
+  const [category, setCategory] = useState<Category>(taskToEdit?.category ?? 'personal');
+  const [dueDate, setDueDate] = useState(taskToEdit?.dueDate ?? presetDate ?? localDateKey());
+  const [startTime, setStartTime] = useState(taskToEdit?.startTime ?? presetTime ?? '');
+  const [minutes, setMinutes] = useState(durationToMinutes(taskToEdit?.duration ?? '1h'));
+  const [repeatId, setRepeatId] = useState(() => {
+    if (!taskToEdit) return 'none';
+    const repeat = REPEATS.find((item) => item.recurrence === taskToEdit.recurrence
+      && (item.rule ?? undefined) === (taskToEdit.recurrence === 'custom' ? taskToEdit.recurrenceRule : undefined));
+    return repeat?.id ?? 'none';
+  });
+  const [reminderLead, setReminderLead] = useState<number | null>(taskToEdit?.reminder ? 10 : null);
+  const [contact, setContact] = useState<{ name: string; phone?: string } | null>(
+    taskToEdit?.contactName ? { name: taskToEdit.contactName, phone: taskToEdit.contactPhone } : null,
   );
-  const [reminderAt, setReminderAt] = useState<string | null>(taskToEdit?.reminderAt ?? null);
-  const [deadline, setDeadline] = useState<string | null>(taskToEdit?.deadline ?? null);
-  const [iosPicker, setIosPicker] = useState<null | { mode: 'date' | 'time' | 'datetime'; target: 'due' | 'start' | 'reminder' }>(null);
-  const [customDuration, setCustomDuration] = useState<{ hours: number; minutes: number } | null>(null);
+  const [iosPicker, setIosPicker] = useState<null | 'date' | 'time'>(null);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<TaskFieldErrors>({});
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [deadline, setDeadline] = useState<string | null>(taskToEdit?.deadline ?? null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [dayFull, setDayFull] = useState<null | { nextDay: string; slot: string | null }>(null);
   // Several activities written as one text: reviewed here before anything is saved.
   const [preview, setPreview] = useState<{ planId: string; drafts: DraftTask[] } | null>(null);
   const [savingPreview, setSavingPreview] = useState(false);
   const savingPreviewRef = useRef(false);
 
-  const anytime = !startTime;
   const detected = useMemo(() => detectSchedule(title), [title]);
   const plannedCount = useMemo(() => (isEditMode ? 0 : parseTasks(title).length), [isEditMode, title]);
-  const suggestedCategory = useMemo(() => (isEditMode ? null : suggestCategoryId(title, categories.map((c) => c.id))), [isEditMode, title, categories]);
-  const overlaps = useMemo(
-    () => findOverlaps(tasks, { id: taskToEdit?.id, dueDate, startTime: startTime || null, duration: durationValue(minutes) }),
+  const clashes = useMemo(
+    () => findClashes(tasks, dueDate, startTime || undefined, minutes, taskToEdit?.id),
     [tasks, dueDate, startTime, minutes, taskToEdit?.id],
   );
-  const dayLoad = useMemo(
-    () => tasks
-      .filter((task) => task.id !== taskToEdit?.id && !task.completed && task.dueDate === dueDate)
-      .reduce((sum, task) => sum + (durationMinutes(task.duration) ?? 0), 0),
-    [tasks, dueDate, taskToEdit?.id],
-  );
-  const loadAfter = dayLoad + (minutes ?? 0);
+  const dayLoad = plannedMinutes(tasks, dueDate, taskToEdit?.id);
+  const loadAfter = dayLoad + minutes;
   const loadColor = loadAfter > 8 * 60 ? theme.danger : loadAfter > 5 * 60 ? theme.warning : theme.success;
-  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-  const isPast = dueDate < today || (dueDate === today && !anytime && (minutesOf(startTime) ?? 0) < nowMinutes);
-  const reminderOptions = anytime ? ANYTIME_REMINDER_OPTIONS : TIMED_REMINDER_OPTIONS;
+  const today = localDateKey();
+  const isPast = dueDate < today || (dueDate === today && startTime !== '' && (minutesFromTime(startTime) ?? 0) < new Date().getHours() * 60 + new Date().getMinutes());
 
-  // The title suggests a category until the user picks one themselves.
-  useEffect(() => {
-    if (!categoryTouched && suggestedCategory) setCategoryId(suggestedCategory);
-  }, [categoryTouched, suggestedCategory]);
-
-  // Switching to Anytime drops reminders that count from a start time.
-  useEffect(() => {
-    if (anytime && reminder !== 'none' && reminder !== 'custom') setReminder('none');
-  }, [anytime, reminder]);
+  const dateOptions = [
+    { label: 'Today', value: today },
+    { label: 'Tomorrow', value: addLocalDays(today, 1) },
+    { label: 'Saturday', value: nextWeekday(6) },
+    { label: 'Next Monday', value: nextWeekday(1) },
+  ];
+  const timeOptions = [
+    { label: 'Morning', value: '09:00' },
+    { label: 'Afternoon', value: '14:00' },
+    { label: 'Evening', value: '18:00' },
+  ];
 
   function applyDetected() {
     if (!detected) return;
@@ -218,65 +252,61 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
     setTitle(detected.cleanTitle);
   }
 
-  function apply(target: 'due' | 'start' | 'reminder', selected: Date, mode: 'date' | 'time' | 'datetime') {
-    if (target === 'due') setDueDate(localDateKey(selected));
-    else if (target === 'start') setStartTime(timeOf(selected.getHours() * 60 + selected.getMinutes()));
-    else {
-      const current = reminderAt ? localDateTime(reminderAt) : null;
-      const base = current ?? dateAt(dueDate, startTime || '09:00');
-      const next = mode === 'date'
-        ? new Date(selected.getFullYear(), selected.getMonth(), selected.getDate(), base.getHours(), base.getMinutes())
-        : mode === 'time'
-          ? new Date(base.getFullYear(), base.getMonth(), base.getDate(), selected.getHours(), selected.getMinutes())
-          : selected;
-      setReminderAt(toLocalDateTime(next));
-      setReminder('custom');
-    }
-  }
-
-  function openPicker(target: 'due' | 'start' | 'reminder') {
-    const value = target === 'reminder'
-      ? (reminderAt && localDateTime(reminderAt)) || dateAt(dueDate, startTime || '09:00')
-      : dateAt(dueDate, startTime);
+  function openPicker(mode: 'date' | 'time') {
+    const value = dateFromKey(dueDate, startTime);
     if (Platform.OS === 'android') {
-      const is24Hour = locale !== 'en';
-      const open = (mode: 'date' | 'time', then?: (picked: Date) => void) => DateTimePickerAndroid.open({
+      DateTimePickerAndroid.open({
         value,
         mode,
-        is24Hour,
+        is24Hour: false,
         onChange: (event: DateTimePickerEvent, selected?: Date) => {
           if (event.type !== 'set' || !selected) return;
-          apply(target, selected, mode);
-          then?.(selected);
+          if (mode === 'date') setDueDate(localDateKey(selected));
+          else setStartTime(timeFromMinutes(selected.getHours() * 60 + selected.getMinutes()));
         },
       });
-      // A custom reminder needs a day and a time: date first, then time.
-      if (target === 'reminder') open('date', () => setTimeout(() => open('time'), 250));
-      else open(target === 'due' ? 'date' : 'time');
       return;
     }
-    setIosPicker({ mode: target === 'due' ? 'date' : target === 'start' ? 'time' : 'datetime', target });
+    setIosPicker(mode);
   }
 
-  async function chooseReminder(option: ReminderOption) {
-    if (option === 'none') {
-      setReminder('none');
-      return;
+  async function pickContact() {
+    try {
+      const Contacts = await import('expo-contacts/legacy');
+      const permission = await Contacts.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Contacts', 'Allow contacts access to link a person to this task.');
+        return;
+      }
+      const picked = await Contacts.presentContactPickerAsync();
+      if (!picked) return;
+      const phone = picked.phoneNumbers?.find((item) => item.isPrimary)?.number ?? picked.phoneNumbers?.[0]?.number;
+      setContact({ name: picked.name || 'Contact', phone: phone || undefined });
+    } catch (error: any) {
+      Alert.alert('Contacts', error?.message || 'Could not open your contacts.');
     }
-    if (!(await permission.ensure())) return;
-    if (option === 'custom') openPicker('reminder');
-    else setReminder(option);
   }
 
   function suggestSlot() {
-    const length = minutes ?? 30;
-    const slot = findFreeSlot(tasks, dueDate, length, taskToEdit?.id);
+    const slot = findFreeSlot(tasks, dueDate, minutes, taskToEdit?.id);
     if (slot) {
       setStartTime(slot);
       return;
     }
     const nextDay = addLocalDays(dueDate, 1);
-    setDayFull({ nextDay, slot: findFreeSlot(tasks, nextDay, length, taskToEdit?.id) });
+    const tomorrowSlot = findFreeSlot(tasks, nextDay, minutes, taskToEdit?.id);
+    Alert.alert(
+      'This day is full',
+      tomorrowSlot
+        ? `There is no ${formatDuration(minutes)} gap left on ${friendlyDay(dueDate)}. ${friendlyDay(nextDay)} at ${formatTime12(tomorrowSlot)} is free.`
+        : `There is no ${formatDuration(minutes)} gap left on ${friendlyDay(dueDate)}.`,
+      tomorrowSlot
+        ? [
+          { text: 'Keep as is', style: 'cancel' },
+          { text: 'Move it', onPress: () => { setDueDate(nextDay); setStartTime(tomorrowSlot); } },
+        ]
+        : undefined,
+    );
   }
 
   async function saveTask() {
@@ -288,7 +318,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
       if (parsed.length > 1) {
         setErrors({});
         setSaveError(null);
-        setPreview({ planId: Crypto.randomUUID(), drafts: parsedToDrafts(parsed, t, categories.map((c) => c.id), settings.defaultDuration) });
+        setPreview({ planId: Crypto.randomUUID(), drafts: parsedToDrafts(parsed) });
         return;
       }
       // One long activity: a short title, with the full text kept as the description.
@@ -301,54 +331,84 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
     setErrors(found);
     setSaveError(null);
     if (Object.keys(found).length) return;
-
+    if (!isSignedIn) {
+      router.replace('/sign-in');
+      return;
+    }
+    const repeat = REPEATS.find((item) => item.id === repeatId) ?? REPEATS[0];
     const payload = {
       title: taskTitle,
       description: taskNotes,
       status: taskToEdit?.status ?? 'todo',
       priority,
-      categoryId,
+      category,
       dueDate,
-      startTime: startTime || null,
-      duration: durationValue(minutes),
-      reminder,
-      reminderAt: reminder === 'custom' ? reminderAt : null,
+      startTime: startTime || undefined,
+      duration: minutesToDuration(minutes),
+      reminder: reminderLead !== null,
+      recurrence: repeat.recurrence,
+      recurrenceRule: repeat.rule,
+      contactName: contact?.name ?? '',
+      contactPhone: contact?.phone ?? '',
       completed: taskToEdit?.completed ?? false,
       ...(taskToEdit?.deadline && !deadline ? { deadline: null } : {}),
-    };
+    } as Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
 
     setSaving(true);
-    let saved: Task;
+    let savedTaskId = taskToEdit?.id;
     try {
-      saved = taskToEdit ? await updateTask(taskToEdit.id, payload) : await addTask(payload);
-    } catch (error) {
+      if (taskToEdit) await updateTask(taskToEdit.id, payload);
+      else savedTaskId = (await addTask(payload)).id;
+    } catch (error: any) {
       setSaving(false);
-      setSaveError(friendlyError(error, t('errors.save')));
+      const serverErrors = error?.response?.data?.errors;
+      if (serverErrors && typeof serverErrors === 'object') setErrors(serverErrors);
+      setSaveError(friendlyError(error, 'Unable to save the task. Please try again.'));
       return;
     }
+
+    if (savedTaskId) {
+      // The task is saved. Local notifications are best-effort and must never hold up saving.
+      const id = savedTaskId;
+      const reminder = FEATURES.reminders && reminderLead !== null
+        ? (() => {
+          const start = dateFromKey(dueDate, startTime || '09:00');
+          const when = new Date(start.getTime() - reminderLead * 60_000);
+          return scheduleTaskReminder(id, payload.title, when.getTime() > Date.now() ? when : start, {
+            body: startTime
+              ? `${friendlyDay(dueDate)} at ${formatTime12(startTime)}${contact ? ` · ${contact.name}` : ''}`
+              : `Planned for ${friendlyDay(dueDate).toLowerCase()}`,
+          });
+        })()
+        : cancelTaskReminder(id);
+      void Promise.resolve(reminder).catch(() => undefined);
+    }
     setSaving(false);
-    if (saved.reminder !== 'none' && !saved.completed && !reminderTime(saved)) toast.info(t('reminders.inPast'));
-    else toast.success(isEditMode ? t('task.saved') : t('task.added'));
+    toast.success(isEditMode ? 'Changes saved' : 'Task added to your plan');
     router.back();
   }
 
   /** Saves every previewed task in one go; the plan id stops a double tap from adding them twice. */
   async function savePreviewTasks() {
     if (!preview || savingPreviewRef.current) return;
+    if (!isSignedIn) {
+      router.replace('/sign-in');
+      return;
+    }
     savingPreviewRef.current = true;
     setSavingPreview(true);
     const payload = toConfirmPayload(preview.drafts);
     try {
-      await confirmLocalPlan(preview.planId, payload);
+      if (LOCAL_MODE) await confirmLocalPlan(preview.planId, payload);
+      else await confirmPlan(preview.planId, payload);
     } catch (error) {
       savingPreviewRef.current = false;
       setSavingPreview(false);
-      toast.error(friendlyError(error, t('errors.save')));
+      toast.error(friendlyError(error, 'Could not save the tasks. Please try again.'));
       return;
     }
     await loadTasks().catch(() => undefined);
-    useTasksStore.setState((state) => ({ version: state.version + 1 }));
-    toast.success(t('task.addedMany', { count: payload.length }));
+    toast.success(`${payload.length} tasks added to your plan`);
     router.back();
   }
 
@@ -358,55 +418,49 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
     try {
       await deleteTask(taskToEdit.id);
       setConfirmingDelete(false);
-      toast.success(t('task.deleted'));
+      toast.success('Task deleted');
       router.back();
     } catch (error) {
       setDeleting(false);
       setConfirmingDelete(false);
-      toast.error(friendlyError(error, t('errors.delete')));
+      toast.error(friendlyError(error, 'Could not delete the task. Please try again.'));
     }
   }
 
-  const endTime = (() => {
-    const times = span({ startTime: startTime || null, duration: durationValue(minutes) });
-    return times && minutes ? timeOf(times[1]) : null;
-  })();
   const summary = [
-    formatDay(locale, dueDate),
-    anytime ? t('task.anytime') : formatTime(locale, startTime),
-    minutes ? formatDuration(locale, minutes) : null,
-    nameOf(categoryId),
-  ].filter(Boolean).join(' · ');
-  const reminderMoment = reminder === 'custom' && reminderAt ? localDateTime(reminderAt) : null;
+    friendlyDay(dueDate),
+    startTime ? formatTime12(startTime) : 'Any time',
+    formatDuration(minutes),
+  ].join(' · ');
 
   if (preview) {
     const count = preview.drafts.length;
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Pressable accessibilityRole="button" accessibilityLabel={t('task.backToText')} disabled={savingPreview} onPress={() => setPreview(null)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+          <Pressable accessibilityLabel="Back to your text" disabled={savingPreview} onPress={() => setPreview(null)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
             <Ionicons name="arrow-back" size={20} color={theme.text} />
           </Pressable>
-          <ThemedText style={styles.headerTitle} accessibilityRole="header">{t('task.previewTitle')}</ThemedText>
+          <ThemedText style={styles.headerTitle}>New tasks</ThemedText>
           <View style={styles.iconBtn} />
         </View>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
           <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
             <PlanReview
-              heading={t('task.previewHeading', { count })}
-              subheading={t('task.previewSub')}
+              heading={count === 1 ? 'ORDINA found 1 task' : `ORDINA found ${count} tasks`}
+              subheading="Check them before saving. Tap a task to change it, or remove it."
               summary={title}
               tasks={preview.drafts}
               questions={[]}
               assumptions={[]}
               answers={{}}
-              today={today}
+              today={localDateKey()}
               saving={savingPreview}
               replanning={false}
               groupByDay
               titleMax={PARSED_TITLE_MAX}
               needsNewTime={(task) => isTimeOver(task)}
-              confirmLabel={(n) => t('task.createMany', { count: n })}
+              confirmLabel={(n) => (n === 1 ? 'Create 1 task' : `Create ${n} tasks`)}
               onChangeTasks={(drafts) => setPreview((current) => (current ? { ...current, drafts } : current))}
               onAnswer={() => undefined}
               onSubmitAnswers={() => undefined}
@@ -422,12 +476,12 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('common.close')} onPress={() => router.back()} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+        <Pressable accessibilityLabel="Close" onPress={() => router.back()} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
           <Ionicons name="close" size={20} color={theme.text} />
         </Pressable>
-        <ThemedText style={styles.headerTitle} accessibilityRole="header">{isEditMode ? t('task.editTitle') : t('task.newTitle')}</ThemedText>
+        <ThemedText style={styles.headerTitle}>{isEditMode ? 'Edit task' : 'New task'}</ThemedText>
         {isEditMode ? (
-          <Pressable accessibilityRole="button" accessibilityLabel={t('task.deleteTitle')} onPress={() => setConfirmingDelete(true)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
+          <Pressable accessibilityLabel="Delete task" onPress={() => setConfirmingDelete(true)} style={[styles.iconBtn, { backgroundColor: theme.card }]}>
             <Ionicons name="trash-outline" size={18} color={theme.danger} />
           </Pressable>
         ) : (
@@ -437,24 +491,26 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-          <View style={[styles.titleCard, { backgroundColor: theme.card, borderColor: errors.title ? theme.danger : theme.border }]}>
+          <View style={[styles.titleCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <TextInput
               value={title}
               onChangeText={(text) => {
                 setTitle(text);
                 if (errors.title) setErrors(({ title: _cleared, ...rest }) => rest);
               }}
-              placeholder={isEditMode ? t('task.titlePlaceholder') : t('task.planPlaceholder')}
+              placeholder={isEditMode ? 'What do you need to do?' : 'What do you need to do? You can write your whole plan.'}
               placeholderTextColor={theme.textSecondary}
-              accessibilityLabel={t('task.titleLabel')}
-              autoFocus={!isEditMode && !presetTitle}
+              accessibilityLabel={isEditMode ? 'Task title' : 'Task or plan'}
+              autoFocus={!isEditMode}
               maxLength={isEditMode ? TITLE_MAX : PLAN_INPUT_MAX}
               multiline
               scrollEnabled
               style={[styles.titleInput, { color: theme.text }]}
             />
             {!isEditMode && title.length >= PLAN_INPUT_MAX - 200 ? (
-              <ThemedText accessibilityLiveRegion="polite" style={[styles.counter, { color: title.length >= PLAN_INPUT_MAX ? theme.danger : theme.textSecondary }]}>
+              <ThemedText
+                accessibilityLiveRegion="polite"
+                style={[styles.counter, { color: title.length >= PLAN_INPUT_MAX ? theme.danger : theme.textSecondary }]}>
                 {title.length} / {PLAN_INPUT_MAX}
               </ThemedText>
             ) : null}
@@ -464,27 +520,31 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
             {plannedCount > 1 ? (
               <View style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="list" size={14} color={theme.primary} />
-                <ThemedText style={[styles.detectedText, { color: theme.primary }]}>{t('task.found', { count: plannedCount })}</ThemedText>
+                <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
+                  {plannedCount} tasks found. You can check them before saving.
+                </ThemedText>
               </View>
             ) : detected && (detected.date !== dueDate || (detected.time && detected.time !== startTime)) ? (
-              <Pressable accessibilityRole="button" onPress={applyDetected} style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
+              <Pressable onPress={applyDetected} style={[styles.detected, { backgroundColor: theme.backgroundSelected }]}>
                 <Ionicons name="flash" size={14} color={theme.primary} />
                 <ThemedText style={[styles.detectedText, { color: theme.primary }]}>
-                  {t('task.setTo', {
-                    label: [detected.date ? formatDay(locale, detected.date) : null, detected.time ? formatTime(locale, detected.time) : null].filter(Boolean).join(' · '),
-                  })}
+                  Set to {detected.label}
                 </ThemedText>
-                <ThemedText themeColor="textSecondary" style={styles.detectedHint}>{t('task.tapToApply')}</ThemedText>
+                <ThemedText themeColor="textSecondary" style={styles.detectedHint}>Tap to apply</ThemedText>
               </Pressable>
             ) : (
-              <ThemedText themeColor="textSecondary" style={styles.tip}>{isEditMode ? t('task.tipEdit') : t('task.tipNew')}</ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.tip}>
+                {isEditMode
+                  ? 'Tip: type “tomorrow at 7am” and ORDINA fills in the time.'
+                  : 'Tip: write several things, like “gym at 6pm, then call mom”, and ORDINA makes separate tasks.'}
+              </ThemedText>
             )}
             <TextInput
               value={notes}
               onChangeText={setNotes}
-              placeholder={t('task.descriptionPlaceholder')}
+              placeholder="Add a description (optional)"
               placeholderTextColor={theme.textSecondary}
-              accessibilityLabel={t('task.descriptionLabel')}
+              accessibilityLabel="Task description"
               maxLength={DESCRIPTION_MAX}
               multiline
               style={[styles.notesInput, { color: theme.text, borderTopColor: theme.border }]}
@@ -493,45 +553,51 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
 
           <Section
             icon="calendar-outline"
-            title={t('task.when')}
+            title="When"
             right={
               <ThemedText style={[styles.sectionValue, { color: isPast ? theme.danger : theme.textSecondary }]}>
-                {isPast ? t('task.inThePast') : formatDay(locale, dueDate)}
+                {isPast ? 'In the past' : friendlyDay(dueDate)}
               </ThemedText>
             }>
-            <ThemedText themeColor="textSecondary" style={styles.label}>{t('task.day')}</ThemedText>
-            <View style={styles.wrap}>
-              <Chip label={t('dates.today')} active={dueDate === today} onPress={() => setDueDate(today)} />
-              <Chip label={t('dates.tomorrow')} active={dueDate === addLocalDays(today, 1)} onPress={() => setDueDate(addLocalDays(today, 1))} />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {dateOptions.map((item) => (
+                <Chip key={item.label} label={item.label} active={dueDate === item.value} onPress={() => setDueDate(item.value)} />
+              ))}
               {HAS_NATIVE_PICKER ? (
                 <Chip
+                  label={dateOptions.some((item) => item.value === dueDate) ? 'Pick date' : friendlyDay(dueDate)}
                   icon="calendar"
-                  label={dueDate === today || dueDate === addLocalDays(today, 1) ? t('task.pickDate') : formatDay(locale, dueDate)}
-                  active={dueDate !== today && dueDate !== addLocalDays(today, 1)}
-                  onPress={() => openPicker('due')}
+                  active={!dateOptions.some((item) => item.value === dueDate)}
+                  onPress={() => openPicker('date')}
                 />
+              ) : !dateOptions.some((item) => item.value === dueDate) ? (
+                <Chip label={friendlyDay(dueDate)} icon="calendar" active onPress={() => undefined} />
               ) : null}
-            </View>
-            <ThemedText themeColor="textSecondary" style={styles.label}>{t('task.time')}</ThemedText>
-            <View style={styles.wrap}>
-              <Chip icon="sunny-outline" label={t('task.anytime')} active={anytime} onPress={() => setStartTime('')} />
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              <Chip label="Any time" active={!startTime} onPress={() => setStartTime('')} />
+              {timeOptions.map((item) => (
+                <Chip key={item.label} label={item.label} active={startTime === item.value} onPress={() => setStartTime(item.value)} />
+              ))}
               {HAS_NATIVE_PICKER ? (
-                <Chip icon="time-outline" label={anytime ? t('task.pickTime') : formatTime(locale, startTime)} active={!anytime} onPress={() => openPicker('start')} />
-              ) : (
-                <Chip icon="time-outline" label="09:00" active={startTime === '09:00'} onPress={() => setStartTime('09:00')} />
-              )}
-            </View>
-            {anytime ? <ThemedText themeColor="textSecondary" style={styles.helper}>{t('task.anytimeHint')}</ThemedText> : null}
+                <Chip
+                  label={startTime && !timeOptions.some((item) => item.value === startTime) ? formatTime12(startTime) : 'Pick time'}
+                  icon="time-outline"
+                  active={Boolean(startTime) && !timeOptions.some((item) => item.value === startTime)}
+                  onPress={() => openPicker('time')}
+                />
+              ) : startTime && !timeOptions.some((item) => item.value === startTime) ? (
+                <Chip label={formatTime12(startTime)} icon="time-outline" active onPress={() => undefined} />
+              ) : null}
+            </ScrollView>
 
             <View style={[styles.load, { backgroundColor: theme.backgroundElement }]}>
               <View style={styles.loadHead}>
                 <ThemedText themeColor="textSecondary" style={styles.loadText}>
-                  {dayLoad
-                    ? t('task.loadPlanned', { day: formatDay(locale, dueDate), duration: formatDuration(locale, dayLoad) })
-                    : t('task.loadNothing', { day: formatDay(locale, dueDate) })}
+                  {friendlyDay(dueDate)}: {formatDuration(dayLoad)} already planned
                 </ThemedText>
                 <ThemedText style={[styles.loadText, { color: loadColor }]}>
-                  {loadAfter > 8 * 60 ? t('task.loadOverloaded') : loadAfter > 5 * 60 ? t('task.loadBusy') : t('task.loadLight')}
+                  {loadAfter > 8 * 60 ? 'Overloaded' : loadAfter > 5 * 60 ? 'Busy' : 'Light'}
                 </ThemedText>
               </View>
               <View style={[styles.loadTrack, { backgroundColor: theme.border }]}>
@@ -539,15 +605,17 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
               </View>
             </View>
 
-            {overlaps.length ? (
-              <View accessibilityRole="alert" style={[styles.warning, { borderColor: theme.warning }]}>
+            {clashes.length ? (
+              <View style={[styles.warning, { borderColor: theme.warning }]}>
                 <Ionicons name="warning-outline" size={16} color={theme.warning} />
-                <ThemedText style={styles.warningText}>{t('task.overlap', { titles: overlaps.map((task) => `“${task.title}”`).join(', ') })}</ThemedText>
+                <ThemedText style={styles.warningText}>
+                  Overlaps with {clashes.map((task) => `“${task.title}”`).join(', ')}
+                </ThemedText>
               </View>
             ) : null}
-            <Pressable accessibilityRole="button" onPress={suggestSlot} style={[styles.slotBtn, { borderColor: theme.primary }]}>
+            <Pressable onPress={suggestSlot} style={[styles.slotBtn, { borderColor: theme.primary }]}>
               <Ionicons name="sparkles-outline" size={16} color={theme.primary} />
-              <ThemedText style={[styles.slotText, { color: theme.primary }]}>{t('task.findSlot')}</ThemedText>
+              <ThemedText style={[styles.slotText, { color: theme.primary }]}>Find a free slot</ThemedText>
             </Pressable>
           </Section>
 
@@ -555,121 +623,117 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
             <View style={[styles.warning, { borderColor: theme.danger }]}>
               <Ionicons name="flag-outline" size={16} color={theme.danger} />
               <ThemedText style={styles.warningText}>
-                {deadline.includes('T')
-                  ? t('task.deadlineBefore', { day: formatDay(locale, deadline.split('T')[0]), time: formatTime(locale, deadline.split('T')[1]) })
-                  : t('task.deadline', { day: formatDay(locale, deadline) })}
+                Deadline: {friendlyDay(deadline.split('T')[0])}
+                {deadline.includes('T') ? `, before ${formatTime12(deadline.split('T')[1])}` : ''}
               </ThemedText>
-              <Pressable accessibilityRole="button" accessibilityLabel={t('task.removeDeadline')} onPress={() => setDeadline(null)} style={styles.removeDeadline}>
-                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>{t('common.remove')}</ThemedText>
+              <Pressable accessibilityRole="button" accessibilityLabel="Remove deadline" onPress={() => setDeadline(null)} style={styles.removeDeadline}>
+                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Remove</ThemedText>
               </Pressable>
             </View>
           ) : null}
 
-          <Section
-            icon="hourglass-outline"
-            title={t('task.duration')}
-            right={<ThemedText themeColor="textSecondary" style={styles.sectionValue}>{minutes ? formatDuration(locale, minutes) : t('task.noDuration')}</ThemedText>}>
-            <View style={styles.wrap}>
-              <Chip label={t('task.noDuration')} active={minutes === null} onPress={() => setMinutes(null)} />
-              {DURATION_PRESETS.map((value) => (
-                <Chip key={value} label={formatDuration(locale, value)} active={minutes === value} onPress={() => setMinutes(value)} />
+          <Section icon="hourglass-outline" title="Duration" right={<ThemedText themeColor="textSecondary" style={styles.sectionValue}>{formatDuration(minutes)}</ThemedText>}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+              {DURATIONS.map((value) => (
+                <Chip key={value} label={formatDuration(value)} active={minutes === value} onPress={() => setMinutes(value)} />
               ))}
-              <Chip
-                icon="options-outline"
-                label={minutes !== null && !(DURATION_PRESETS as readonly number[]).includes(minutes) ? formatDuration(locale, minutes) : t('task.customDuration')}
-                active={minutes !== null && !(DURATION_PRESETS as readonly number[]).includes(minutes)}
-                onPress={() => setCustomDuration({ hours: Math.floor((minutes ?? 45) / 60), minutes: (minutes ?? 45) % 60 })}
-              />
-            </View>
-            {endTime ? <ThemedText themeColor="textSecondary" style={styles.helper}>{t('task.endsAt', { time: formatTime(locale, endTime) })}</ThemedText> : null}
-            {errors.duration ? <ThemedText style={[styles.fieldError, { color: theme.danger }]}>{errors.duration}</ThemedText> : null}
+            </ScrollView>
+            {startTime ? (
+              <ThemedText themeColor="textSecondary" style={styles.helper}>
+                Ends at {formatTime12(timeFromMinutes((minutesFromTime(startTime) ?? 0) + minutes))}
+              </ThemedText>
+            ) : null}
           </Section>
 
-          <Section icon="flag-outline" title={t('priority.label')}>
+          <Section icon="flag-outline" title="Priority">
             <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
-              {(['low', 'medium', 'high'] as const).map((id) => {
-                const active = priority === id;
+              {PRIORITIES.map((item) => {
+                const active = priority === item.id;
                 return (
                   <Pressable
-                    key={id}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: active }}
-                    onPress={() => setPriority(id)}
-                    style={[styles.segmentItem, active && { backgroundColor: theme.card, borderColor: PRIORITY_COLORS[id] }]}>
-                    <View style={[styles.dot, { backgroundColor: PRIORITY_COLORS[id] }]} />
-                    <ThemedText style={[styles.segmentText, active && { color: PRIORITY_COLORS[id] }]}>{t(`priority.${id}`)}</ThemedText>
+                    key={item.id}
+                    onPress={() => setPriority(item.id)}
+                    style={[styles.segmentItem, active && { backgroundColor: theme.card, borderColor: item.color }]}>
+                    <View style={[styles.dot, { backgroundColor: item.color }]} />
+                    <ThemedText style={[styles.segmentText, active && { color: item.color }]}>{item.label}</ThemedText>
                   </Pressable>
                 );
               })}
             </View>
           </Section>
 
-          <Section
-            icon="pricetag-outline"
-            title={t('categories.label')}
-            right={
-              <Pressable accessibilityRole="link" hitSlop={10} onPress={() => router.push('/categories')}>
-                <ThemedText style={[styles.sectionValue, { color: theme.primary }]}>{t('common.edit')}</ThemedText>
-              </Pressable>
-            }>
+          <Section icon="pricetag-outline" title="Category">
             <View style={styles.wrap}>
-              {categories.map((category) => (
+              {CATEGORIES.map((item) => (
                 <Chip
-                  key={category.id}
-                  label={nameOf(category.id)}
-                  icon={category.icon}
-                  color={category.color}
-                  active={categoryId === category.id}
-                  trailingIcon={!categoryTouched && suggestedCategory === category.id ? 'sparkles' : undefined}
-                  accessibilityLabel={!categoryTouched && suggestedCategory === category.id ? `${nameOf(category.id)}, ${t('categories.suggested')}` : undefined}
-                  onPress={() => {
-                    setCategoryId(category.id);
-                    setCategoryTouched(true);
-                  }}
+                  key={item.id}
+                  label={item.label}
+                  icon={item.icon}
+                  color={item.color}
+                  active={category === item.id}
+                  onPress={() => setCategory(item.id)}
                 />
               ))}
             </View>
           </Section>
 
-          <Section
-            icon="notifications-outline"
-            title={t('task.reminder')}
-            right={reminderMoment ? <ThemedText themeColor="textSecondary" style={styles.sectionValue}>{t('reminders.customAt', { moment: formatMoment(locale, reminderMoment.toISOString()) })}</ThemedText> : undefined}>
-            {settings.remindersEnabled ? (
-              <>
-                <View style={styles.wrap}>
-                  {reminderOptions.map((option) => (
-                    <Chip
-                      key={option}
-                      icon={option === 'custom' ? 'alarm-outline' : undefined}
-                      label={option === 'custom' && reminderMoment ? formatMoment(locale, reminderMoment.toISOString()) : t(REMINDER_KEY[option])}
-                      active={reminder === option}
-                      onPress={() => void chooseReminder(option)}
-                    />
-                  ))}
+          {FEATURES.reminders ? <Section icon="notifications-outline" title="Reminder">
+            <View style={styles.wrap}>
+              {REMINDERS.map((item) => (
+                <Chip key={item.label} label={item.label} active={reminderLead === item.minutes} onPress={() => setReminderLead(item.minutes)} />
+              ))}
+            </View>
+          </Section> : null}
+
+          {FEATURES.repeatingTasks ? (
+            <Section icon="repeat-outline" title="Repeat">
+              <View style={styles.wrap}>
+                {REPEATS.map((item) => (
+                  <Chip key={item.id} label={item.label} active={repeatId === item.id} onPress={() => setRepeatId(item.id)} />
+                ))}
+              </View>
+            </Section>
+          ) : null}
+
+          {FEATURES.contacts ? <Section icon="people-outline" title="With someone">
+            {contact ? (
+              <View style={styles.contactRow}>
+                <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]}>
+                  <ThemedText style={{ color: theme.primary, fontFamily: 'Poppins_600SemiBold' }}>
+                    {contact.name.slice(0, 1).toUpperCase()}
+                  </ThemedText>
                 </View>
-                {anytime ? <ThemedText themeColor="textSecondary" style={styles.helper}>{t('reminders.anytimeHint')}</ThemedText> : null}
-              </>
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={styles.contactName} numberOfLines={1}>{contact.name}</ThemedText>
+                  {contact.phone ? <ThemedText themeColor="textSecondary" style={styles.helper}>{contact.phone}</ThemedText> : null}
+                </View>
+                <ContactActions name={contact.name} phone={contact.phone} compact />
+                <Pressable accessibilityLabel="Remove person" hitSlop={8} onPress={() => setContact(null)}>
+                  <Ionicons name="close-circle" size={20} color={theme.textSecondary} />
+                </Pressable>
+              </View>
             ) : (
-              <Pressable accessibilityRole="link" onPress={() => router.push('/settings')}>
-                <ThemedText themeColor="textSecondary" style={styles.helper}>{t('reminders.off')}</ThemedText>
+              <Pressable onPress={() => void pickContact()} style={[styles.slotBtn, { borderColor: theme.border }]}>
+                <Ionicons name="person-add-outline" size={16} color={theme.text} />
+                <ThemedText style={styles.slotText}>Link a contact for quick call & message</ThemedText>
               </Pressable>
             )}
-          </Section>
+          </Section> : null}
         </ScrollView>
 
         <View style={[styles.footer, { backgroundColor: theme.background, borderTopColor: theme.border }]}>
-          {saveError || Object.keys(errors).some((key) => key !== 'title' && key !== 'duration') ? (
+          {saveError || Object.keys(errors).some((key) => key !== 'title') ? (
             <ThemedText accessibilityRole="alert" style={[styles.fieldError, { color: theme.danger, textAlign: 'center' }]}>
-              {saveError ?? Object.entries(errors).find(([key]) => key !== 'title' && key !== 'duration')?.[1]}
+              {saveError ?? Object.entries(errors).find(([key]) => key !== 'title')?.[1]}
             </ThemedText>
           ) : null}
           <ThemedText themeColor="textSecondary" style={styles.summary} numberOfLines={1}>
             {summary}
-            {reminder !== 'none' ? ' · 🔔' : ''}
+            {reminderLead !== null ? ' · 🔔' : ''}
+            {repeatId !== 'none' ? ' · 🔁' : ''}
           </ThemedText>
           <PrimaryButton
-            label={saving ? t('common.saving') : isEditMode ? t('task.saveChanges') : plannedCount > 1 ? t('task.review', { count: plannedCount }) : t('task.create')}
+            label={saving ? 'Saving…' : isEditMode ? 'Save changes' : plannedCount > 1 ? `Review ${plannedCount} tasks` : 'Create task'}
             disabled={saving}
             onPress={() => void saveTask()}
           />
@@ -678,69 +742,14 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
 
       <ConfirmDialog
         visible={confirmingDelete}
-        title={t('task.deleteTitle')}
-        message={t('task.deleteMessage', { title: taskToEdit?.title ?? '' })}
-        confirmLabel={t('common.delete')}
+        title="Delete this task?"
+        message={`“${taskToEdit?.title ?? ''}” will be removed from your plan. This cannot be undone.`}
+        confirmLabel="Delete"
         destructive
         busy={deleting}
         onConfirm={() => void removeTask()}
         onCancel={() => setConfirmingDelete(false)}
       />
-
-      <ConfirmDialog
-        visible={dayFull !== null}
-        title={t('task.dayFull')}
-        message={dayFull?.slot
-          ? t('task.dayFullMove', { duration: formatDuration(locale, minutes ?? 30), day: formatDay(locale, dueDate), nextDay: formatDay(locale, dayFull.nextDay), time: formatTime(locale, dayFull.slot) })
-          : t('task.dayFullBody', { duration: formatDuration(locale, minutes ?? 30), day: formatDay(locale, dueDate) })}
-        confirmLabel={dayFull?.slot ? t('task.moveIt') : t('common.ok')}
-        cancelLabel={t('task.keepAsIs')}
-        hideCancel={!dayFull?.slot}
-        onConfirm={() => {
-          if (dayFull?.slot) {
-            setDueDate(dayFull.nextDay);
-            setStartTime(dayFull.slot);
-          }
-          setDayFull(null);
-        }}
-        onCancel={() => setDayFull(null)}
-      />
-
-      <Modal transparent visible={customDuration !== null} animationType="fade" onRequestClose={() => setCustomDuration(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setCustomDuration(null)}>
-          <Pressable style={[styles.sheet, { backgroundColor: theme.card }]}>
-            <ThemedText style={styles.headerTitle} accessibilityRole="header">{t('task.customDurationTitle')}</ThemedText>
-            {customDuration ? (
-              <>
-                <ThemedText themeColor="textSecondary" style={styles.label}>{t('task.hours')}</ThemedText>
-                <View style={styles.wrap}>
-                  {Array.from({ length: 13 }, (_, h) => (
-                    <Chip key={h} label={String(h)} active={customDuration.hours === h} onPress={() => setCustomDuration({ hours: h, minutes: h === 12 ? 0 : customDuration.minutes })} />
-                  ))}
-                </View>
-                <ThemedText themeColor="textSecondary" style={styles.label}>{t('task.minutesShort')}</ThemedText>
-                <View style={styles.wrap}>
-                  {Array.from({ length: 12 }, (_, i) => i * 5).map((m) => (
-                    <Chip key={m} label={pad(m)} disabled={customDuration.hours === 12 && m > 0} active={customDuration.minutes === m} onPress={() => setCustomDuration({ ...customDuration, minutes: m })} />
-                  ))}
-                </View>
-                <ThemedText style={[styles.helper, { color: isValidCustomDuration(customDuration.hours * 60 + customDuration.minutes) ? theme.textSecondary : theme.danger }]}>
-                  {formatDuration(locale, customDuration.hours * 60 + customDuration.minutes) || '0'} · {t('task.durationRange')}
-                </ThemedText>
-                <PrimaryButton
-                  label={t('common.done')}
-                  disabled={!isValidCustomDuration(customDuration.hours * 60 + customDuration.minutes)}
-                  onPress={() => {
-                    const total = Math.min(DURATION_MAX, Math.max(DURATION_MIN, customDuration.hours * 60 + customDuration.minutes));
-                    setMinutes(total);
-                    setCustomDuration(null);
-                  }}
-                />
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {Platform.OS === 'ios' ? (
         <Modal transparent visible={iosPicker !== null} animationType="fade" onRequestClose={() => setIosPicker(null)}>
@@ -748,20 +757,21 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetTitle }: { taskToE
             <Pressable style={[styles.sheet, { backgroundColor: theme.card }]}>
               {iosPicker ? (
                 <DateTimePicker
-                  value={iosPicker.target === 'reminder' ? (reminderAt && localDateTime(reminderAt)) || dateAt(dueDate, startTime || '09:00') : dateAt(dueDate, startTime)}
-                  mode={iosPicker.mode}
-                  display={iosPicker.mode === 'date' ? 'inline' : 'spinner'}
+                  value={dateFromKey(dueDate, startTime)}
+                  mode={iosPicker}
+                  display={iosPicker === 'date' ? 'inline' : 'spinner'}
                   onChange={(_event, selected) => {
-                    if (selected) apply(iosPicker.target, selected, iosPicker.mode);
+                    if (!selected) return;
+                    if (iosPicker === 'date') setDueDate(localDateKey(selected));
+                    else setStartTime(timeFromMinutes(selected.getHours() * 60 + selected.getMinutes()));
                   }}
                 />
               ) : null}
-              <PrimaryButton label={t('common.done')} onPress={() => setIosPicker(null)} />
+              <PrimaryButton label="Done" onPress={() => setIosPicker(null)} />
             </Pressable>
           </Pressable>
         </Modal>
       ) : null}
-      {permission.dialogs}
     </SafeAreaView>
   );
 }
@@ -773,11 +783,11 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 10 },
   headerTitle: { fontSize: 18, fontFamily: 'Poppins_600SemiBold' },
   iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  form: { paddingHorizontal: 16, paddingBottom: 24, gap: 12, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  form: { paddingHorizontal: 16, paddingBottom: 24, gap: 12 },
   titleCard: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 8 },
   titleInput: { fontSize: 20, fontFamily: 'Poppins_600SemiBold', paddingVertical: 4, minHeight: 36, maxHeight: 260, textAlignVertical: 'top' },
   counter: { alignSelf: 'flex-end', fontSize: 12, fontFamily: 'Poppins_500Medium' },
-  detected: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 },
+  detected: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   detectedText: { fontSize: 12, fontFamily: 'Poppins_600SemiBold' },
   detectedHint: { fontSize: 11 },
   tip: { fontSize: 11 },
@@ -785,24 +795,29 @@ const styles = StyleSheet.create({
   section: { borderWidth: 1, borderRadius: 18, padding: 14, gap: 10 },
   sectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   sectionTitle: { flex: 1, fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
-  sectionValue: { fontSize: 12, fontFamily: 'Poppins_500Medium', flexShrink: 1, textAlign: 'right' },
-  label: { fontSize: 12, fontFamily: 'Poppins_500Medium', marginBottom: -4 },
+  sectionValue: { fontSize: 12, fontFamily: 'Poppins_500Medium' },
+  chipRow: { gap: 8, paddingRight: 8 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  chipText: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
   load: { borderRadius: 12, padding: 10, gap: 6 },
-  loadHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  loadText: { fontSize: 12, fontFamily: 'Poppins_500Medium', flexShrink: 1 },
+  loadHead: { flexDirection: 'row', justifyContent: 'space-between' },
+  loadText: { fontSize: 12, fontFamily: 'Poppins_500Medium' },
   loadTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   loadFill: { height: 6, borderRadius: 3 },
   warning: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10 },
   warningText: { flex: 1, fontSize: 12 },
   removeDeadline: { minHeight: 44, paddingHorizontal: 8, justifyContent: 'center' },
-  slotBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, minHeight: 44 },
+  slotBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingVertical: 10 },
   slotText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   helper: { fontSize: 12 },
   segment: { flexDirection: 'row', borderRadius: 12, padding: 4, gap: 4 },
-  segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, minHeight: 40, borderWidth: 1, borderColor: 'transparent' },
+  segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, paddingVertical: 9, borderWidth: 1, borderColor: 'transparent' },
   segmentText: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  contactRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  contactName: { fontFamily: 'Poppins_500Medium' },
   footer: { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, gap: 8, borderTopWidth: StyleSheet.hairlineWidth },
   summary: { fontSize: 12, textAlign: 'center' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },

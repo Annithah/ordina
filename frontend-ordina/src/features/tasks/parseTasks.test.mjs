@@ -17,14 +17,15 @@ test('the example paragraph becomes 6 organised tasks', () => {
   assert.deepEqual(brief(tasks), [
     ['Study Python', '2026-10-16', '08:00', 120, 'medium'],
     ['Team meeting', '2026-10-16', '14:00', null, 'medium'],
-    ['Go to the gym', '2026-10-16', null, null, 'medium'],
+    ['Go to the gym', '2026-10-16', '18:00', null, 'medium'],
     ['Call my mentor', '2026-10-17', '19:00', null, 'medium'],
-    ['Prepare my presentation', '2026-10-17', null, null, 'medium'],
+    ['Prepare my presentation', '2026-10-17', '20:00', null, 'medium'],
     ['Submit the report', '2026-10-23', null, null, 'high'],
   ]);
-  assert.equal(tasks[2].partOfDay, 'evening', 'no time given: Anytime, with the evening as a hint');
-  assert.ok(tasks.every((t) => !t.timeSuggested), 'ORDINA never guesses a time');
+  assert.equal(tasks[2].timeSuggested, true, 'evening is a suggested time');
+  assert.equal(tasks[0].timeSuggested, false);
   assert.equal(tasks[4].after, 'Call my mentor');
+  assert.equal(tasks[4].timeSuggested, true);
   assert.ok(tasks.every((t) => !t.needsNewTime));
 });
 
@@ -72,12 +73,12 @@ test('time formats: 8am, 8 a.m., 14:00, at 6, noon', () => {
   assert.deepEqual(times, ['08:00', '08:00', '14:00', '18:00', '12:00', '21:00']);
 });
 
-test('parts of the day stay Anytime, kept as a hint', () => {
+test('parts of the day become suggested times', () => {
   const tasks = parseTasks('Tomorrow morning go for a run, in the afternoon do laundry, tonight read a book', NOW);
-  assert.deepEqual(tasks.map((t) => [t.title, t.date, t.startTime, t.partOfDay]), [
-    ['Go for a run', '2026-10-17', null, 'morning'],
-    ['Do laundry', '2026-10-17', null, 'afternoon'],
-    ['Read a book', '2026-10-16', null, 'night'],
+  assert.deepEqual(tasks.map((t) => [t.title, t.date, t.startTime, t.timeSuggested]), [
+    ['Go for a run', '2026-10-17', '09:00', true],
+    ['Do laundry', '2026-10-17', '14:00', true],
+    ['Read a book', '2026-10-16', '20:00', true],
   ]);
 });
 
@@ -121,16 +122,15 @@ test('a time already passed today needs a new time', () => {
   assert.deepEqual(tasks.map((t) => [t.title, t.needsNewTime]), [['Gym', true], ['Call John', false]]);
 });
 
-test('"then" and "also" split; "after that" notes the previous task but guesses no time', () => {
+test('"then" and "also" split; "after that" follows the previous task', () => {
   const tasks = parseTasks('Study at 9 for 90 minutes then have lunch, also call dad. Wash dishes at 4pm and after that rest', NOW);
   assert.deepEqual(tasks.map((t) => [t.title, t.startTime]), [
     ['Study', '09:00'],
     ['Have lunch', null],
     ['Call dad', null],
     ['Wash dishes', '16:00'],
-    ['Rest', null],
+    ['Rest', '17:00'],
   ]);
-  assert.equal(tasks[4].after, 'Wash dishes');
 });
 
 test('long titles are cut to the title limit; filler is removed', () => {

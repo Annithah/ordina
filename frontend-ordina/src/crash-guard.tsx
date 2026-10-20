@@ -10,8 +10,6 @@ import * as SplashScreen from 'expo-splash-screen';
 import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
-import { translate } from '@/i18n';
-
 type Listener = (error: Error) => void;
 
 let lastError: Error | null = null;
@@ -51,9 +49,9 @@ export function CrashScreen({ error, onRetry }: { error: Error; onRetry?: () => 
   const details = (error.stack || '').split('\n').slice(0, 8).join('\n');
   return (
     <View style={{ flex: 1, backgroundColor: '#F8FAFC', paddingTop: 64, paddingHorizontal: 20, paddingBottom: 24 }}>
-      <Text style={{ fontSize: 22, fontWeight: '700', color: '#0F172A' }}>{translate('crash.title')}</Text>
+      <Text style={{ fontSize: 22, fontWeight: '700', color: '#0F172A' }}>ORDINA AI hit a problem</Text>
       <Text style={{ marginTop: 8, fontSize: 15, color: '#475569' }}>
-        {translate('crash.body')}
+        Your tasks on this phone are safe. Please take a screenshot of this screen and send it to the developer.
       </Text>
       <ScrollView style={{ marginTop: 16, flex: 1, borderRadius: 12, backgroundColor: '#E2E8F0' }} contentContainerStyle={{ padding: 12 }}>
         <Text selectable style={{ fontSize: 15, fontWeight: '700', color: '#B91C1C' }}>
@@ -70,7 +68,7 @@ export function CrashScreen({ error, onRetry }: { error: Error; onRetry?: () => 
           accessibilityRole="button"
           onPress={onRetry}
           style={{ marginTop: 16, minHeight: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: '#5C4DF2' }}>
-          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>{translate('common.retry')}</Text>
+          <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}>Try again</Text>
         </Pressable>
       ) : null}
     </View>
