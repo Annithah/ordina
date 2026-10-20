@@ -2,6 +2,7 @@
  * Task rules for tasks stored on the phone (offline mode). Same rules and messages as the
  * server: backend-ordina/src/lib/task-validation.js. Keep the two files in step.
  */
+import { knownCategory } from '@/features/categories';
 import { isValidDateKey, isValidTime } from '@/utils/task-validation';
 
 export const TITLE_MAX = 200;
@@ -11,7 +12,6 @@ const MAX_DURATION = 24 * 60;
 
 const PRIORITIES = new Set(['low', 'medium', 'high']);
 const STATUSES = new Set(['todo', 'pending', 'in_progress', 'completed']);
-const CATEGORIES = new Set(['work', 'personal', 'health', 'learning', 'design', 'database']);
 
 export type TaskRuleErrors = Partial<Record<
   'title' | 'description' | 'dueDate' | 'startTime' | 'duration' | 'priority' | 'status' | 'category' | 'deadline',
@@ -118,9 +118,10 @@ export function validateTaskInput(body: Record<string, unknown>, { partial = fal
   if (has('completed')) value.completed = Boolean(input.completed);
 
   if (has('category')) {
-    const category = String(input.category || '').toLowerCase();
-    if (category && !CATEGORIES.has(category)) errors.category = 'Unknown category.';
-    else value.category = category || null;
+    // Version 1 ids (design, database) are still accepted and renamed.
+    const category = input.category ? knownCategory(input.category) : null;
+    if (input.category && !category) errors.category = 'Unknown category.';
+    else value.category = category;
   }
 
   if (has('deadline')) {

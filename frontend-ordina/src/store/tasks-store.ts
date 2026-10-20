@@ -11,11 +11,13 @@ import {
   updateLocalTask,
 } from '@/services/local-tasks';
 import { cancelTaskReminder } from '@/services/notifications';
+import { normalizeCategory } from '@/features/categories';
 import { friendlyError } from '@/utils/task-validation';
 
 export type Priority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed';
-export type Category = 'work' | 'personal' | 'health' | 'learning' | 'design' | 'database';
+/** A category id from features/categories (e.g. "work", "exams", "bills"). */
+export type Category = string;
 
 export interface Task {
   id: string;
@@ -69,7 +71,7 @@ function normalizeTask(task: any): Task {
     description: task.description ?? '',
     status: task.status === 'completed' ? 'completed' : task.status === 'in_progress' ? 'in_progress' : 'todo',
     priority: task.priority === 'high' || task.priority === 3 ? 'high' : task.priority === 'medium' || task.priority === 2 ? 'medium' : 'low',
-    category: (task.category ?? 'work') as Category,
+    category: normalizeCategory(task.category),
     projectId: task.projectId ? String(task.projectId) : undefined,
     dueDate: task.dueDate ?? task.due_at ?? undefined,
     startTime: task.startTime ?? undefined,

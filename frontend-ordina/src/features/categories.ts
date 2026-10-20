@@ -67,11 +67,16 @@ const LEGACY: Record<string, string> = { design: 'creative', database: 'errands'
 
 export const DEFAULT_CATEGORY = 'personal';
 
-/** Any stored value -> a known category id (old ids are renamed, unknown ones become Personal). */
-export function normalizeCategory(value: unknown): string {
-  const id = String(value ?? '').toLowerCase();
+/** A known category id (old version 1 ids are renamed), or null when the value is not a category. */
+export function knownCategory(value: unknown): string | null {
+  const id = String(value ?? '').trim().toLowerCase();
   const mapped = LEGACY[id] ?? id;
-  return CATEGORY_IDS.has(mapped) ? mapped : DEFAULT_CATEGORY;
+  return CATEGORY_IDS.has(mapped) ? mapped : null;
+}
+
+/** Any stored value -> a category id; unknown or empty values become Personal. */
+export function normalizeCategory(value: unknown): string {
+  return knownCategory(value) ?? DEFAULT_CATEGORY;
 }
 
 export function categoryInfo(id: unknown): CategoryInfo {
