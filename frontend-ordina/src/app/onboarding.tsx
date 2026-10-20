@@ -155,7 +155,7 @@ export default function OnboardingScreen() {
     return (
       <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
         <OnboardingArt />
-        {/* Floats over the artwork so the welcome layout stays exactly the same. */}
+        {/* Top-left, away from the logo on the right; floats so the welcome layout stays the same. */}
         <View style={[styles.languageCorner, { top: insets.top + 10 }]}>
           <LanguageButton />
         </View>
@@ -302,7 +302,7 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 20 },
-  languageCorner: { position: 'absolute', right: 20, zIndex: 2 },
+  languageCorner: { position: 'absolute', left: 20, zIndex: 2 },
   welcomeCopy: { flex: 1, justifyContent: 'flex-end', paddingBottom: 28, gap: 8 },
   headline: { fontSize: 32, lineHeight: 40, fontFamily: 'Poppins_700Bold' },
   headlineCompact: { fontSize: 24, lineHeight: 32 },
