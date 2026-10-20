@@ -6,7 +6,8 @@ import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -125,8 +126,7 @@ export default function SettingsScreen() {
         <ThemedText style={styles.screenTitle}>{t('profile.title')}</ThemedText>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
+      <KeyboardAwareScrollView bottomOffset={32} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
           {/* Profile card */}
           <View style={[styles.userCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <View style={styles.userRow}>
@@ -231,8 +231,7 @@ export default function SettingsScreen() {
             {t('profile.version', { version: APP_VERSION })}
             {savedCount !== null ? `\n${t('profile.savedTasks', { n: savedCount })}` : ''}
           </ThemedText>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
 
       <ConfirmDialog
         visible={confirm !== null}
