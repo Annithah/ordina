@@ -1,4 +1,5 @@
 import type { Task } from '@/store/tasks-store';
+import { translate } from '@/i18n/translations';
 import { localDateKey } from '@/utils/dates';
 
 /**
@@ -53,11 +54,9 @@ export function taskStatus(task: Task, now = new Date()): TaskStatusLabel {
   return health === 'completed' || health === 'overdue' ? health : 'pending';
 }
 
-export const STATUS_LABEL: Record<TaskStatusLabel, string> = {
-  pending: 'Pending',
-  completed: 'Completed',
-  overdue: 'Overdue',
-};
+export function statusLabel(status: TaskStatusLabel) {
+  return translate(status === 'pending' ? 'home.todo' : `home.${status}`);
+}
 
 export function healthColor(health: TaskHealth, theme: { success: string; warning: string; danger: string; textSecondary: string }) {
   switch (health) {
@@ -72,12 +71,9 @@ export function healthColor(health: TaskHealth, theme: { success: string; warnin
   }
 }
 
-export const HEALTH_LABEL: Record<TaskHealth, string> = {
-  completed: 'Completed',
-  inProgress: 'In progress',
-  overdue: 'Incomplete / overdue',
-  planned: 'Planned',
-};
+export function healthLabel(health: TaskHealth) {
+  return translate(health === 'overdue' ? 'home.incomplete' : `home.${health}`);
+}
 
 export function summarize(tasks: Task[], now = new Date()) {
   const counts = { completed: 0, inProgress: 0, overdue: 0, planned: 0 };

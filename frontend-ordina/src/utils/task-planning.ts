@@ -1,4 +1,5 @@
 import type { Task } from '@/store/tasks-store';
+import { activeLocale, translate } from '@/i18n/translations';
 import { addLocalDays, localDateKey } from '@/utils/dates';
 
 export function minutesFromTime(value?: string) {
@@ -44,11 +45,11 @@ export function formatTime12(value?: string) {
 
 export function friendlyDay(dateKey: string) {
   const today = localDateKey();
-  if (dateKey === today) return 'Today';
-  if (dateKey === addLocalDays(today, 1)) return 'Tomorrow';
-  if (dateKey === addLocalDays(today, -1)) return 'Yesterday';
+  if (dateKey === today) return translate('task.today');
+  if (dateKey === addLocalDays(today, 1)) return translate('task.tomorrow');
+  if (dateKey === addLocalDays(today, -1)) return translate('task.yesterday');
   const [y, mo, d] = dateKey.split('-').map(Number);
-  return new Date(y, mo - 1, d).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  return new Date(y, mo - 1, d).toLocaleDateString(activeLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /** Tasks on the day that overlap the given slot. */
