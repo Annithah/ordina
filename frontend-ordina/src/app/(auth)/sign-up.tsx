@@ -1,7 +1,6 @@
-import { Link } from 'expo-router';
-import { href } from '@/utils/href';
+import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AuthField } from '@/components/auth-field';
@@ -10,37 +9,44 @@ import { PrimaryButton } from '@/components/primary-button';
 import { SocialAuthButtons } from '@/components/social-auth-buttons';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuthStore } from '@/store/auth-store';
+import { useI18n } from '@/providers/i18n-provider';
+import { AuthError, EMAIL_RE, PASSKEY_RE, useAuthStore } from '@/store/auth-store';
 import { routeAfterAuth } from '@/utils/after-auth';
-import { FEATURES } from '@/config/release';
+import { href } from '@/utils/href';
+
+type Fields = { name: string; email: string; passkey: string; confirm: string };
 
 export default function SignUpScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const signUp = useAuthStore((s) => s.signUp);
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
+  const [fields, setFields] = useState<Fields>({ name: '', email: '', passkey: '', confirm: '' });
+  const [errors, setErrors] = useState<Partial<Record<keyof Fields, string>>>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const set = (key: keyof Fields, digits = false) => (value: string) => {
+    setFields((current) => ({ ...current, [key]: digits ? value.replace(/\D/g, '').slice(0, 4) : value }));
+    setErrors(({ [key]: _cleared, ...rest }) => rest);
+  };
 
   async function onCreate() {
-    if (!name.trim() || !email.trim() || !password) {
-      Alert.alert('Create Account', 'Fill in name, email, and password.');
-      return;
-    }
-    if (password !== confirm) {
-      Alert.alert('Create Account', 'Passwords do not match.');
-      return;
-    }
-
+    const found: typeof errors = {};
+    if (!fields.name.trim()) found.name = t('auth.errors.name');
+    if (!EMAIL_RE.test(fields.email.trim())) found.email = t('auth.errors.email');
+    if (!PASSKEY_RE.test(fields.passkey)) found.passkey = t('auth.errors.passkey');
+    else if (fields.confirm !== fields.passkey) found.confirm = t('auth.errors.confirm');
+    setErrors(found);
+    setFormError(null);
+    if (Object.keys(found).length) return;
+    setSubmitting(true);
     try {
-      await signUp({
-        name: name.trim(),
-        email: email.trim(),
-        password,
-      });
+      await signUp({ name: fields.name, email: fields.email, passkey: fields.passkey });
       routeAfterAuth();
-    } catch (error: any) {
-      Alert.alert('Create account failed', error?.response?.data?.message ?? 'Unable to connect to the server. Check your network connection.');
+    } catch (error) {
+      setFormError(t(`auth.errors.${error instanceof AuthError ? error.code : 'exists'}`));
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -51,53 +57,79 @@ export default function SignUpScreen() {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
-          <BrandLockup markSize={88} wordmarkSize="sm" />
+          <BrandLockup markSize={80} wordmarkSize="sm" />
 
           <View style={styles.heading}>
-            <ThemedText style={styles.title}>Create Account</ThemedText>
-            <ThemedText themeColor="textSecondary" style={styles.subtitle}>
-              Start organizing your day
-            </ThemedText>
+            <ThemedText style={styles.title}>{t('auth.signUpTitle')}</ThemedText>
+            <ThemedText themeColor="textSecondary" style={styles.subtitle}>{t('auth.signUpSubtitle')}</ThemedText>
           </View>
 
-          <AuthField label="Full Name" placeholder="Sarah Jones" value={name} onChangeText={setName} />
+          <SocialAuthButtons />
+
+          <View style={styles.dividerRow}>
+            <View style={[styles.line, { backgroundColor: theme.border }]} />
+            <ThemedText themeColor="textSecondary" style={styles.or}>{t('auth.orEmail')}</ThemedText>
+            <View style={[styles.line, { backgroundColor: theme.border }]} />
+          </View>
+
           <AuthField
-            label="Email Address"
-            placeholder="sarah.jones@example.com"
+            label={t('auth.name')}
+            placeholder={t('auth.namePlaceholder')}
+            autoComplete="name"
+            value={fields.name}
+            error={errors.name}
+            onChangeText={set('name')}
+          />
+          <AuthField
+            label={t('auth.email')}
+            placeholder={t('auth.emailPlaceholder')}
             autoCapitalize="none"
+            autoComplete="email"
             keyboardType="email-address"
-            value={email}
-            onChangeText={setEmail}
+            value={fields.email}
+            error={errors.email}
+            onChangeText={set('email')}
           />
-          <AuthField label="Password" placeholder="••••••••" isPassword value={password} onChangeText={setPassword} />
           <AuthField
-            label="Confirm Password"
-            placeholder="••••••••"
+            label={t('auth.passkey')}
+            placeholder="••••"
             isPassword
-            value={confirm}
-            onChangeText={setConfirm}
+            keyboardType="number-pad"
+            maxLength={4}
+            value={fields.passkey}
+            error={errors.passkey}
+            onChangeText={set('passkey', true)}
           />
+          <AuthField
+            label={t('auth.confirmPasskey')}
+            placeholder="••••"
+            isPassword
+            keyboardType="number-pad"
+            maxLength={4}
+            value={fields.confirm}
+            error={errors.confirm}
+            onChangeText={set('confirm', true)}
+            onSubmitEditing={() => void onCreate()}
+          />
+          <ThemedText themeColor="textSecondary" style={styles.hint}>{t('auth.passkeyHint')}</ThemedText>
 
-          <PrimaryButton label="Create Account" onPress={() => void onCreate()} />
-
-          {FEATURES.socialSignIn ? (
-            <>
-              <View style={styles.dividerRow}>
-                <View style={[styles.line, { backgroundColor: theme.border }]} />
-                <ThemedText themeColor="textSecondary" style={styles.or}>
-                  or sign up with
-                </ThemedText>
-                <View style={[styles.line, { backgroundColor: theme.border }]} />
-              </View>
-              <SocialAuthButtons />
-            </>
+          {formError ? (
+            <View accessibilityRole="alert" style={[styles.notice, { backgroundColor: theme.backgroundSelected }]}>
+              <ThemedText style={styles.noticeText}>{formError}</ThemedText>
+            </View>
           ) : null}
 
+          <PrimaryButton
+            label={submitting ? t('auth.creating') : t('auth.createAccount')}
+            disabled={submitting}
+            onPress={() => void onCreate()}
+          />
+
           <View style={styles.footer}>
-            <ThemedText themeColor="textSecondary">Already have an account? </ThemedText>
-            <Link href={href('/sign-in')}>
-              <ThemedText style={[styles.link, { color: theme.primary }]}>Sign In</ThemedText>
-            </Link>
+            <ThemedText themeColor="textSecondary">{t('auth.haveAccount')} </ThemedText>
+            <Pressable onPress={() => router.replace(href('/sign-in'))} hitSlop={6}>
+              <ThemedText style={[styles.link, { color: theme.primary }]}>{t('auth.signInLink')}</ThemedText>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -107,24 +139,16 @@ export default function SignUpScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: {
-    paddingHorizontal: 24,
-    paddingTop: 4,
-    paddingBottom: 28,
-    gap: 12,
-    flexGrow: 1,
-  },
+  scroll: { paddingHorizontal: 24, paddingTop: 4, paddingBottom: 28, gap: 12, flexGrow: 1 },
   heading: { gap: 4, marginTop: 8, marginBottom: 2 },
-  title: { fontSize: 28, fontFamily: 'Poppins_700Bold' },
+  title: { fontSize: 26, fontFamily: 'Poppins_700Bold' },
   subtitle: { fontSize: 14 },
+  hint: { fontSize: 12, marginTop: -4 },
   link: { fontFamily: 'Poppins_600SemiBold', fontSize: 14 },
   dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 2 },
   line: { flex: 1, height: 1 },
   or: { fontSize: 12 },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 'auto',
-    paddingTop: 16,
-  },
+  notice: { borderRadius: 12, padding: 12 },
+  noticeText: { fontSize: 13, textAlign: 'center' },
+  footer: { flexDirection: 'row', justifyContent: 'center', flexWrap: 'wrap', marginTop: 'auto', paddingTop: 16 },
 });

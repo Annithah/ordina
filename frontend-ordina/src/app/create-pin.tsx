@@ -4,11 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
+import { useAuthStore } from '@/store/auth-store';
 import { useLockStore } from '@/store/lock-store';
 import { href } from '@/utils/href';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 function Pad({ onDigit, onDelete }: { onDigit: (d: string) => void; onDelete: () => void }) {
   const theme = useTheme();
@@ -32,6 +34,8 @@ export default function CreatePinScreen() {
   const theme = useTheme();
   const { t } = useI18n();
   const createPin = useLockStore((s) => s.createPin);
+  // Opened from Settings to change the passkey (otherwise: choosing one after Google/Apple sign-in).
+  const changing = useLocalSearchParams<{ mode?: string }>().mode === 'change';
   const [step, setStep] = useState<'create' | 'confirm'>('create');
   const [first, setFirst] = useState('');
   const [pin, setPin] = useState('');
@@ -61,9 +65,15 @@ export default function CreatePinScreen() {
       setPin('');
       return;
     }
-    await createPin(first);
-    if (router.canGoBack()) router.back();
-    else router.replace(href('/(tabs)'));
+    const hash = await createPin(first);
+    // The passkey belongs to the account: it signs in with it and opens the app with it.
+    await useAuthStore.getState().attachPasskey(hash);
+    if (changing) {
+      toast.success(t('lock.saved'));
+      router.back();
+    } else {
+      router.replace(href('/(tabs)'));
+    }
   }
 
   const dots = useMemo(() => [0, 1, 2, 3], []);
@@ -71,7 +81,7 @@ export default function CreatePinScreen() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]}>
       <ThemedText style={styles.title}>
-        {step === 'create' ? t('lock.createTitle') : t('lock.confirmTitle')}
+        {step === 'create' ? t(changing ? 'lock.changeTitle' : 'lock.createTitle') : t('lock.confirmTitle')}
       </ThemedText>
       <ThemedText themeColor="textSecondary" style={styles.body}>
         {step === 'create' ? t('lock.createBody') : t('lock.confirmBody')}

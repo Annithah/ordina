@@ -37,9 +37,12 @@ async function write(key: string, value: string | null) {
   }
 }
 
-async function hashPin(pin: string) {
+/** The 4-digit passkey is never stored; only this hash is. */
+export async function hashPin(pin: string) {
   return Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, `ordina:${pin}`);
 }
+
+export type PinResult = 'ok' | 'wrong' | 'locked';
 
 type LockState = {
   hydrated: boolean;
@@ -48,8 +51,13 @@ type LockState = {
   lockUntil: number;
   attempts: number;
   hydrate: () => Promise<void>;
-  createPin: (pin: string) => Promise<void>;
-  verifyPin: (pin: string) => Promise<'ok' | 'wrong' | 'locked'>;
+  /** Saves a new passkey for this phone and returns its hash (also stored on the account). */
+  createPin: (pin: string) => Promise<string>;
+  /** Uses an account's passkey hash as the passkey that opens the app. */
+  setPinHash: (hash: string | null) => Promise<void>;
+  verifyPin: (pin: string) => Promise<PinResult>;
+  /** Checks a passkey against any stored hash, with the same 3 tries / 3 minute pause. */
+  verifyAgainst: (pin: string, hash: string | null | undefined) => Promise<PinResult>;
   remainingMs: () => number;
   markUnlocked: () => void;
   markLocked: () => void;
@@ -80,18 +88,24 @@ export const useLockStore = create<LockState>((set, get) => ({
   markLocked: () => set({ unlocked: false }),
 
   createPin: async (pin) => {
-    await write(KEYS.pin, await hashPin(pin));
+    const hash = await hashPin(pin);
+    await write(KEYS.pin, hash);
     await write(KEYS.attempts, '0');
     await write(KEYS.lockUntil, null);
     set({ hasPin: true, unlocked: true, attempts: 0, lockUntil: 0 });
+    return hash;
   },
 
-  verifyPin: async (pin) => {
+  setPinHash: async (hash) => {
+    await write(KEYS.pin, hash);
+    set({ hasPin: Boolean(hash) });
+  },
+
+  verifyPin: async (pin) => get().verifyAgainst(pin, await read(KEYS.pin)),
+
+  verifyAgainst: async (pin, hash) => {
     if (get().remainingMs() > 0) return 'locked';
-    const stored = await read(KEYS.pin);
-    if (!stored) return 'wrong';
-    const ok = (await hashPin(pin)) === stored;
-    if (ok) {
+    if (hash && (await hashPin(pin)) === hash) {
       await write(KEYS.attempts, '0');
       set({ unlocked: true, attempts: 0 });
       return 'ok';
