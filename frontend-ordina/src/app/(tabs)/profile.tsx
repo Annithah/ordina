@@ -19,6 +19,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { localeName } from '@/i18n/translations';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAppTheme } from '@/providers/theme-provider';
+import { canReachServer, currentApiBaseUrl, normalizeServerUrl, saveServerOverride } from '@/services/api';
 import { countLocalTasks, deleteAllLocalData } from '@/services/local-tasks';
 import { useAuthStore } from '@/store/auth-store';
 import { usePreferencesStore } from '@/store/preferences-store';
@@ -65,6 +66,69 @@ function Row({ icon, label, value, onPress, danger, last }: {
       {value ? <ThemedText themeColor="textSecondary" style={styles.rowValue} numberOfLines={1}>{value}</ThemedText> : null}
       {danger ? null : <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />}
     </Pressable>
+  );
+}
+
+/** Where ORDINA AI runs (the laptop on the same Wi-Fi): see it, test it, change it without a new build. */
+function AiServerRow() {
+  const theme = useTheme();
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [address, setAddress] = useState(currentApiBaseUrl());
+  const [state, setState] = useState<'idle' | 'testing' | 'ok' | 'fail' | 'invalid'>('idle');
+
+  async function test(save: boolean) {
+    const url = normalizeServerUrl(address);
+    if (!url) {
+      setState('invalid');
+      return;
+    }
+    setAddress(url);
+    setState('testing');
+    const ok = await canReachServer(url);
+    setState(ok ? 'ok' : 'fail');
+    if (save) {
+      await saveServerOverride(url);
+      toast.success(t('profile.aiServerSaved'));
+    }
+  }
+
+  return (
+    <View>
+      <Row icon="server-outline" label={t('profile.aiServer')} value={currentApiBaseUrl().replace(/^https?:\/\//, '')} onPress={() => setOpen((value) => !value)} />
+      {open ? (
+        <View style={[styles.serverBox, { borderBottomColor: theme.border }]}>
+          <ThemedText themeColor="textSecondary" style={styles.serverHint}>{t('profile.aiServerHint')}</ThemedText>
+          <TextInput
+            value={address}
+            onChangeText={(value) => {
+              setAddress(value);
+              setState('idle');
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="http://192.168.1.20:4000"
+            placeholderTextColor={theme.textSecondary}
+            accessibilityLabel={t('profile.aiServer')}
+            style={[styles.nameInput, { color: theme.text, backgroundColor: theme.input }]}
+          />
+          {state !== 'idle' ? (
+            <ThemedText style={[styles.serverState, { color: state === 'ok' ? theme.success : state === 'testing' ? theme.textSecondary : theme.warning }]}>
+              {t(`profile.aiServer_${state}`)}
+            </ThemedText>
+          ) : null}
+          <View style={styles.serverActions}>
+            <Pressable onPress={() => void test(false)} style={[styles.serverBtn, { borderColor: theme.border }]}>
+              <ThemedText style={styles.serverBtnText}>{t('profile.aiServerTest')}</ThemedText>
+            </Pressable>
+            <Pressable onPress={() => void test(true)} style={[styles.serverBtn, { backgroundColor: theme.primary, borderColor: theme.primary }]}>
+              <ThemedText style={[styles.serverBtnText, { color: theme.onPrimary }]}>{t('common.save')}</ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -217,6 +281,7 @@ export default function SettingsScreen() {
             {FEATURES.integrations ? (
               <Row icon="git-network-outline" label={t('profile.integrations')} onPress={() => router.push(href('/integrations'))} />
             ) : null}
+            <AiServerRow />
             <Row icon="refresh-outline" label={t('profile.replayIntro')} last onPress={() => router.push(href('/onboarding'))} />
           </Section>
 
@@ -275,4 +340,10 @@ const styles = StyleSheet.create({
   themeOptions: { flexDirection: 'row', borderRadius: 10, padding: 3, gap: 3 },
   themeOption: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderRadius: 8, paddingVertical: 8 },
   version: { fontSize: 12, textAlign: 'center' },
+  serverBox: { paddingHorizontal: 14, paddingBottom: 14, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  serverHint: { fontSize: 12, lineHeight: 17 },
+  serverState: { fontSize: 12, fontFamily: 'Poppins_500Medium' },
+  serverActions: { flexDirection: 'row', gap: 8 },
+  serverBtn: { flex: 1, borderWidth: 1, borderRadius: 12, minHeight: 42, alignItems: 'center', justifyContent: 'center' },
+  serverBtnText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
 });

@@ -56,6 +56,59 @@ export const api = axios.create({
   },
 });
 
+// The ORDINA AI server address can be changed in Settings (e.g. the laptop got a new Wi-Fi
+// address) without a new build. Saved on the phone; empty means the built-in address.
+const SERVER_KEY = 'ordina.aiServer.v1';
+
+export function currentApiBaseUrl() {
+  return String(api.defaults.baseURL ?? '');
+}
+
+/** "10.0.0.5:4000" or "http://10.0.0.5:4000/" -> "http://10.0.0.5:4000"; null if it isn't an address. */
+export function normalizeServerUrl(value: string): string | null {
+  const text = value.trim().replace(/\/+$/, '');
+  if (!text) return null;
+  const withScheme = /^https?:\/\//i.test(text) ? text : `http://${text}`;
+  try {
+    const url = new URL(withScheme);
+    return url.hostname ? `${url.protocol}//${url.host}` : null;
+  } catch {
+    return null;
+  }
+}
+
+async function storage() {
+  return import('expo-secure-store');
+}
+
+/** Uses the address saved in Settings, if any. Called once at startup. */
+export async function loadServerOverride() {
+  try {
+    const saved = await (await storage()).getItemAsync(SERVER_KEY);
+    if (saved) api.defaults.baseURL = saved;
+  } catch {
+    // keep the built-in address
+  }
+}
+
+/** Saves a new server address (null = back to the built-in one) and uses it right away. */
+export async function saveServerOverride(url: string | null) {
+  const store = await storage();
+  if (url) await store.setItemAsync(SERVER_KEY, url);
+  else await store.deleteItemAsync(SERVER_KEY);
+  api.defaults.baseURL = url ?? API_BASE_URL;
+}
+
+/** True when this phone can reach the server at the address (5 second limit). */
+export async function canReachServer(url: string) {
+  try {
+    const response = await axios.get(`${url}/health`, { timeout: 5000 });
+    return response.status === 200;
+  } catch {
+    return false;
+  }
+}
+
 export function setAuthToken(token?: string) {
   if (token) api.defaults.headers.common.Authorization = `Bearer ${token}`;
   else delete api.defaults.headers.common.Authorization;

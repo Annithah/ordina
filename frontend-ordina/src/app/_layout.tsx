@@ -14,6 +14,7 @@ import { ToastHost } from '@/components/toast';
 import { CrashScreen } from '@/crash-guard';
 import { ThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import { I18nProvider } from '@/providers/i18n-provider';
+import { loadServerOverride } from '@/services/api';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
 import { useLockStore } from '@/store/lock-store';
@@ -78,6 +79,7 @@ export default function RootLayout() {
     void hydrate();
     void hydrateLock();
     void loadPreferences();
+    void loadServerOverride();
   }, [hydrate, hydrateLock, loadPreferences]);
 
   // If the fonts can't load, continue with the system font instead of a blank screen.
