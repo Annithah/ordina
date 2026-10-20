@@ -30,6 +30,8 @@ import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { Radii } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
+import { aiNoticeKind, isOnline, type AiNoticeKind } from '@/services/connectivity';
 import { LAPTOP_MESSAGE } from '@/services/device-session';
 import { confirmAiActions, confirmPlan, fetchAiMessages, interpretFromMedia, interpretInstruction, requestPlan, transcribeAudio } from '@/services/ai';
 import { MAX_MEDIA_BYTES, matchingContacts, pickTaskMedia, type MediaSource } from '@/services/device-integrations';
@@ -46,6 +48,7 @@ import { localDateKey } from '@/utils/dates';
 import { mergeReplan, toConfirmPayload, toDrafts, toKeepTasks } from '@/utils/plan-draft';
 import { friendlyError } from '@/utils/task-validation';
 import { FEATURES } from '@/config/release';
+import { useNetworkState } from 'expo-network';
 
 type VoiceState = 'ready' | 'listening' | 'processing' | 'understanding' | 'confirmation' | 'completed' | 'error';
 
@@ -125,8 +128,20 @@ function fileSize(uri: string) {
   }
 }
 
+type AiNotice = { kind: AiNoticeKind; message?: string; retry?: () => void };
+
+const NOTICE_ICON: Record<AiNoticeKind, keyof typeof Ionicons.glyphMap> = {
+  offline: 'cloud-offline-outline',
+  unreachable: 'cafe-outline',
+  slow: 'hourglass-outline',
+  problem: 'information-circle-outline',
+};
+
 export default function OrdinaAiScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
+  const network = useNetworkState();
+  const isOffline = network.isConnected === false || network.isInternetReachable === false;
   const ordinaUserId = useAuthStore((state) => state.user?.id);
   const loadTasks = useTasksStore((s) => s.loadTasks);
   const scrollRef = useRef<ScrollView>(null);
@@ -153,7 +168,20 @@ export default function OrdinaAiScreen() {
   const [planning, setPlanning] = useState(false);
   const [replanning, setReplanning] = useState(false);
   const [savingPlan, setSavingPlan] = useState(false);
-  const [aiError, setAiError] = useState<{ message: string; retry?: () => void } | null>(null);
+  const [aiError, setAiError] = useState<AiNotice | null>(null);
+
+  /** Explains a failed AI request calmly: offline, AI not reachable, slow, or the server's own message. */
+  async function showNotice(error: unknown, fallback: string, retry: () => void) {
+    const kind: AiNoticeKind = (await isOnline()) ? aiNoticeKind(error) : 'offline';
+    setAiError({ kind, message: kind === 'problem' ? aiErrorMessage(error, fallback) : undefined, retry });
+  }
+
+  /** No internet: say so before sending anything; the user's text stays where it is. */
+  async function stopIfOffline(retry: () => void) {
+    if (await isOnline()) return false;
+    setAiError({ kind: 'offline', retry });
+    return true;
+  }
 
   const busy = voice === 'understanding' || voice === 'processing' || saving || planning || replanning || savingPlan;
 
@@ -197,6 +225,7 @@ export default function OrdinaAiScreen() {
       return;
     }
     setAiError(null);
+    if (await stopIfOffline(() => void send(message))) return;
     setAttachOpen(false);
     setResult(null);
     setPlanning(true);
@@ -214,7 +243,7 @@ export default function OrdinaAiScreen() {
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
     } catch (error) {
       setVoice('error');
-      setAiError({ message: aiErrorMessage(error, 'ORDINA AI could not plan that. Please try again.'), retry: () => void send(message) });
+      await showNotice(error, 'ORDINA AI could not plan that. Please try again.', () => void send(message));
     } finally {
       setPlanning(false);
     }
@@ -228,6 +257,7 @@ export default function OrdinaAiScreen() {
     if (!newAnswers.length) return;
     const allAnswers = [...answered, ...newAnswers];
     setAiError(null);
+    if (await stopIfOffline(() => void submitAnswers())) return;
     setReplanning(true);
     try {
       const next = await requestPlan({ message: planRequest, answers: allAnswers, keepTasks: toKeepTasks(drafts) });
@@ -237,7 +267,7 @@ export default function OrdinaAiScreen() {
       setAnswered(allAnswers);
       setHistory((rows) => [...rows, { role: 'user', content: newAnswers.map((item) => item.answer).join(' · ') }, { role: 'assistant', content: next.summary }]);
     } catch (error) {
-      setAiError({ message: aiErrorMessage(error, 'ORDINA AI could not update the plan. Please try again.'), retry: () => void submitAnswers() });
+      await showNotice(error, 'ORDINA AI could not update the plan. Please try again.', () => void submitAnswers());
     } finally {
       setReplanning(false);
     }
@@ -258,7 +288,7 @@ export default function OrdinaAiScreen() {
       setVoice('completed');
       if (count) router.push({ pathname: '/schedule-created', params: { taskIds: saved.created.map((task) => task.id).join(',') } });
     } catch (error) {
-      setAiError({ message: aiErrorMessage(error, 'Your plan could not be saved. Please try again.'), retry: () => void addPlanToTasks() });
+      await showNotice(error, 'Your plan could not be saved. Please try again.', () => void addPlanToTasks());
     } finally {
       setSavingPlan(false);
     }
@@ -278,9 +308,10 @@ export default function OrdinaAiScreen() {
   async function sendLegacy(text: string) {
     const message = text.trim();
     if (!message || busy) return;
+    setAiError(null);
+    if (await stopIfOffline(() => void sendLegacy(message))) return;
     setPlan(null);
     setDrafts([]);
-    setAiError(null);
     setVoice('understanding');
     setAttachOpen(false);
     setResult(null);
@@ -294,7 +325,7 @@ export default function OrdinaAiScreen() {
       showResult(await interpretInstruction({ message, timezone: timezone(), contacts, calendarEvents: events }));
     } catch (error: any) {
       setVoice('error');
-      setAiError({ message: errorMessage(error, 'Unable to reach ORDINA AI.'), retry: () => void sendLegacy(message) });
+      await showNotice(error, errorMessage(error, 'Unable to reach ORDINA AI.'), () => void sendLegacy(message));
     }
   }
 
@@ -675,18 +706,26 @@ export default function OrdinaAiScreen() {
           ) : null}
         </ScrollView>
 
-        {aiError ? (
-          <View accessibilityRole="alert" style={[styles.errorBar, { borderColor: theme.danger, backgroundColor: theme.card }]}>
-            <Ionicons name="alert-circle" size={18} color={theme.danger} />
-            <ThemedText style={styles.errorText}>{aiError.message}</ThemedText>
-            {aiError.retry ? (
+        {aiError || isOffline ? (
+          // Calm, friendly colours: being offline is normal and nothing is broken.
+          <View accessibilityRole="alert" style={[styles.errorBar, { borderColor: theme.border, backgroundColor: theme.backgroundSelected }]}>
+            <Ionicons name={NOTICE_ICON[aiError?.kind ?? 'offline']} size={20} color={theme.primary} />
+            <View style={styles.noticeCopy}>
+              <ThemedText style={styles.noticeTitle}>
+                {t(`ai.${aiError?.kind === 'problem' ? 'problemTitle' : `${aiError?.kind ?? 'offline'}Title`}`)}
+              </ThemedText>
+              <ThemedText themeColor="textSecondary" style={styles.errorText}>
+                {aiError?.kind === 'problem' ? aiError.message : t(`ai.${aiError?.kind ?? 'offline'}Body`)}
+              </ThemedText>
+            </View>
+            {aiError?.retry ? (
               <Pressable accessibilityRole="button" disabled={busy} onPress={aiError.retry} style={styles.errorAction}>
-                <ThemedText style={{ color: theme.danger, fontFamily: 'Poppins_600SemiBold' }}>Try again</ThemedText>
+                <ThemedText style={{ color: theme.primary, fontFamily: 'Poppins_600SemiBold' }}>{t('common.tryAgain')}</ThemedText>
               </Pressable>
             ) : null}
-            <Pressable accessibilityRole="button" accessibilityLabel="Dismiss" onPress={() => setAiError(null)} style={styles.errorAction}>
+            {aiError ? <Pressable accessibilityRole="button" accessibilityLabel={t('common.dismiss')} onPress={() => setAiError(null)} style={styles.errorAction}>
               <Ionicons name="close" size={18} color={theme.textSecondary} />
-            </Pressable>
+            </Pressable> : null}
           </View>
         ) : null}
 
@@ -868,6 +907,8 @@ const styles = StyleSheet.create({
   input: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 15, paddingVertical: 10, paddingHorizontal: 6, minHeight: 40, maxHeight: 120 },
   mic: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   errorBar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderRadius: 14, paddingLeft: 12 },
-  errorText: { flex: 1, fontSize: 13, paddingVertical: 10 },
+  errorText: { fontSize: 13, lineHeight: 18 },
+  noticeCopy: { flex: 1, paddingVertical: 10, gap: 2 },
+  noticeTitle: { fontSize: 14, fontFamily: 'Poppins_600SemiBold' },
   errorAction: { minHeight: 44, minWidth: 44, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center' },
 });
