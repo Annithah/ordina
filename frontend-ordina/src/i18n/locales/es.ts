@@ -148,6 +148,7 @@ export const es: PartialTranslation = {
     notYou: '¿No eres tú? Cerrar sesión',
   },
   home: {
+    loadFailed: "No pudimos abrir tus tareas guardadas en este momento.",
     showingStatus: "{status} · {n} tareas",
     showAll: "Ver todas",
     morning: 'Buenos días', afternoon: 'Buenas tardes', evening: 'Buenas noches', there: 'amigo',
@@ -297,6 +298,7 @@ export const es: PartialTranslation = {
     problemTitle: 'Algo no ha funcionado',
   },
   profile: {
+    savedTasks: "{n} tareas guardadas en este teléfono",
     title: 'Ajustes', editProfile: 'Editar perfil', nameLabel: 'Tu nombre', nameSaved: 'Tu nombre está guardado',
     signedInWith: 'Sesión iniciada con {provider}', providerEmail: 'correo',
     sectionAccount: 'CUENTA', sectionPreferences: 'PREFERENCIAS', sectionPlanning: 'PLANIFICACIÓN', sectionData: 'DATOS Y PRIVACIDAD', sectionAbout: 'ACERCA DE',

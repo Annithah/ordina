@@ -149,6 +149,7 @@ export const fr: PartialTranslation = {
     notYou: 'Ce n’est pas vous ? Se déconnecter',
   },
   home: {
+    loadFailed: "Impossible d’ouvrir vos tâches enregistrées pour le moment.",
     showingStatus: "{status} · {n} tâches",
     showAll: "Tout afficher",
     morning: 'Bonjour', afternoon: 'Bon après-midi', evening: 'Bonsoir', there: 'à vous',
@@ -298,6 +299,7 @@ export const fr: PartialTranslation = {
     problemTitle: 'Quelque chose n’a pas fonctionné',
   },
   profile: {
+    savedTasks: "{n} tâches enregistrées sur ce téléphone",
     title: 'Réglages', editProfile: 'Modifier le profil', nameLabel: 'Votre nom', nameSaved: 'Votre nom est enregistré',
     signedInWith: 'Connecté avec {provider}', providerEmail: 'e-mail',
     sectionAccount: 'COMPTE', sectionPreferences: 'PRÉFÉRENCES', sectionPlanning: 'PLANIFICATION', sectionData: 'DONNÉES ET CONFIDENTIALITÉ', sectionAbout: 'À PROPOS',

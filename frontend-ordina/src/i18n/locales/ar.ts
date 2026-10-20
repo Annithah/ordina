@@ -148,6 +148,7 @@ export const ar: PartialTranslation = {
     notYou: 'لست أنت؟ تسجيل الخروج',
   },
   home: {
+    loadFailed: "تعذّر فتح مهامك المحفوظة الآن.",
     showingStatus: "{status} · {n} مهام",
     showAll: "عرض الكل",
     morning: 'صباح الخير', afternoon: 'مساء الخير', evening: 'مساء الخير', there: 'صديقي',
@@ -297,6 +298,7 @@ export const ar: PartialTranslation = {
     problemTitle: 'حدث شيء غير متوقع',
   },
   profile: {
+    savedTasks: "{n} مهام محفوظة على هذا الهاتف",
     title: 'الإعدادات', editProfile: 'تعديل الملف الشخصي', nameLabel: 'اسمك', nameSaved: 'تم حفظ اسمك',
     signedInWith: 'تم الدخول عبر {provider}', providerEmail: 'البريد الإلكتروني',
     sectionAccount: 'الحساب', sectionPreferences: 'التفضيلات', sectionPlanning: 'التخطيط', sectionData: 'البيانات والخصوصية', sectionAbout: 'حول',

@@ -148,6 +148,7 @@ export const sw: PartialTranslation = {
     notYou: 'Si wewe? Toka',
   },
   home: {
+    loadFailed: "Hatukuweza kufungua kazi zako zilizohifadhiwa sasa hivi.",
     showingStatus: "{status} · kazi {n}",
     showAll: "Onyesha zote",
     morning: 'Habari za asubuhi', afternoon: 'Habari za mchana', evening: 'Habari za jioni', there: 'rafiki',
@@ -297,6 +298,7 @@ export const sw: PartialTranslation = {
     problemTitle: 'Kuna kitu hakikufanya kazi',
   },
   profile: {
+    savedTasks: "Kazi {n} zimehifadhiwa kwenye simu hii",
     title: 'Mipangilio', editProfile: 'Hariri wasifu', nameLabel: 'Jina lako', nameSaved: 'Jina lako limehifadhiwa',
     signedInWith: 'Umeingia kwa {provider}', providerEmail: 'barua pepe',
     sectionAccount: 'AKAUNTI', sectionPreferences: 'MAPENDELEO', sectionPlanning: 'UPANGAJI', sectionData: 'DATA NA FARAGHA', sectionAbout: 'KUHUSU',

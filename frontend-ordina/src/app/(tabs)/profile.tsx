@@ -4,8 +4,8 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
-import { router } from 'expo-router';
-import { useState, type ReactNode } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useState, type ReactNode } from 'react';
 import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,7 +18,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { localeName } from '@/i18n/translations';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAppTheme } from '@/providers/theme-provider';
-import { deleteAllLocalData } from '@/services/local-tasks';
+import { countLocalTasks, deleteAllLocalData } from '@/services/local-tasks';
 import { useAuthStore } from '@/store/auth-store';
 import { usePreferencesStore } from '@/store/preferences-store';
 import { useTasksStore } from '@/store/tasks-store';
@@ -80,6 +80,11 @@ export default function SettingsScreen() {
   const [name, setName] = useState(user?.name ?? '');
   const [confirm, setConfirm] = useState<null | 'signOut' | 'deleteTasks'>(null);
   const [busy, setBusy] = useState(false);
+  // Read straight from the phone's database, so it shows what is really saved.
+  const [savedCount, setSavedCount] = useState<number | null>(null);
+  useFocusEffect(useCallback(() => {
+    void countLocalTasks().then(setSavedCount).catch(() => setSavedCount(null));
+  }, []));
 
   const displayName = user?.name || t('profile.guest');
   const provider = user?.provider === 'google' ? 'Google' : user?.provider === 'apple' ? 'Apple' : t('profile.providerEmail');
@@ -104,6 +109,7 @@ export default function SettingsScreen() {
       }
       await deleteAllLocalData();
       await loadTasks();
+      setSavedCount(0);
       toast.success(t('profile.deleteTasksDone'));
     } catch {
       toast.error(t('profile.deleteTasksFailed'));
@@ -223,6 +229,7 @@ export default function SettingsScreen() {
 
           <ThemedText themeColor="textSecondary" style={styles.version}>
             {t('profile.version', { version: APP_VERSION })}
+            {savedCount !== null ? `\n${t('profile.savedTasks', { n: savedCount })}` : ''}
           </ThemedText>
         </ScrollView>
       </KeyboardAvoidingView>

@@ -235,6 +235,12 @@ export async function confirmLocalPlan(planId: string, tasks: TaskInput[]): Prom
   return { created: rows.map(toTask), ...(replayed ? { replayed: true } : {}) };
 }
 
+/** How many tasks are stored in the phone's database (Settings shows it). */
+export async function countLocalTasks() {
+  const row = await (await db()).getFirstAsync<{ n: number }>('SELECT COUNT(*) AS n FROM tasks');
+  return Number(row?.n ?? 0);
+}
+
 /** Removes every task and plan record on this phone. */
 export async function deleteAllLocalData() {
   await (await db()).execAsync('DELETE FROM tasks; DELETE FROM plan_confirmations;');

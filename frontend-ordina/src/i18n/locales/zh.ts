@@ -148,6 +148,7 @@ export const zh: PartialTranslation = {
     notYou: '不是您？退出登录',
   },
   home: {
+    loadFailed: "暂时无法打开已保存的任务。",
     showingStatus: "{status} · {n} 项任务",
     showAll: "显示全部",
     morning: '早上好', afternoon: '下午好', evening: '晚上好', there: '朋友',
@@ -297,6 +298,7 @@ export const zh: PartialTranslation = {
     problemTitle: '出了点问题',
   },
   profile: {
+    savedTasks: "这部手机上保存了 {n} 项任务",
     title: '设置', editProfile: '编辑资料', nameLabel: '您的姓名', nameSaved: '姓名已保存',
     signedInWith: '通过{provider}登录', providerEmail: '邮箱',
     sectionAccount: '账户', sectionPreferences: '偏好', sectionPlanning: '计划', sectionData: '数据与隐私', sectionAbout: '关于',
