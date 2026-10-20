@@ -148,6 +148,8 @@ export const ar: PartialTranslation = {
     notYou: 'لست أنت؟ تسجيل الخروج',
   },
   home: {
+    showingStatus: "{status} · {n} مهام",
+    showAll: "عرض الكل",
     morning: 'صباح الخير', afternoon: 'مساء الخير', evening: 'مساء الخير', there: 'صديقي',
     tellOrdina: 'أخبر ORDINA بما يجب فعله...',
     searchPlaceholder: 'ابحث في مهامك',

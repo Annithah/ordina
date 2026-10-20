@@ -18,7 +18,7 @@ import { useProductivityStore } from '@/store/productivity-store';
 import { useTasksStore } from '@/store/tasks-store';
 import { api } from '@/services/api';
 import { localDateKey, addLocalDays } from '@/utils/dates';
-import { healthColor, summarize, taskHealth, type TaskHealth } from '@/utils/task-health';
+import { dashboardStatus, summarize, taskHealth, type DashboardStatus } from '@/utils/task-health';
 import { friendlyError } from '@/utils/task-validation';
 import { FEATURES } from '@/config/release';
 
@@ -44,12 +44,19 @@ function formatGreeting(t: (path: string) => string): string {
   return t('home.evening');
 }
 
-const HEALTH_KEY: Record<TaskHealth, string> = {
+const STATUS_KEY: Record<DashboardStatus, string> = {
   completed: 'home.completed',
   inProgress: 'home.inProgress',
   overdue: 'home.overdue',
-  planned: 'home.planned',
+  todo: 'home.todo',
 };
+
+function statusTint(status: DashboardStatus, theme: { success: string; warning: string; danger: string; textSecondary: string }) {
+  if (status === 'completed') return theme.success;
+  if (status === 'inProgress') return theme.warning;
+  if (status === 'overdue') return theme.danger;
+  return theme.textSecondary;
+}
 
 function firstName(name: string | null | undefined, fallback: string) {
   if (!name) return fallback;
@@ -90,6 +97,8 @@ export default function HomeScreen() {
   const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string | null>(null);
+  // Tapping a Dashboard number shows only those tasks.
+  const [statusFilter, setStatusFilter] = useState<DashboardStatus | null>(null);
 
   useEffect(() => {
     void loadTasks();
@@ -109,8 +118,16 @@ export default function HomeScreen() {
   const today = localDateKey();
   const tomorrow = addLocalDays(today, 1);
   const todaysTasks = tasks.filter((task) => task.dueDate === today);
-  const todayCounts = summarize(todaysTasks);
-  const overdueCount = tasks.filter((task) => !task.completed && Boolean(task.dueDate && task.dueDate < today)).length;
+  // Dashboard: today's completed and started tasks, and every unfinished task whose time has passed.
+  const dash = useMemo(() => {
+    const counts = { completed: 0, inProgress: 0, overdue: 0, todo: 0 };
+    for (const task of tasks) {
+      const status = dashboardStatus(task);
+      if (status === 'overdue') counts.overdue += 1;
+      else if (task.dueDate === today) counts[status] += 1;
+    }
+    return counts;
+  }, [tasks, today]);
   const upcomingCount = tasks.filter((task) => !task.completed && Boolean(task.dueDate && task.dueDate > today)).length;
   const activeGoals = goals.filter((goal) => !goal.completed && goal.status !== 'archived');
   const activeReminders = reminders.filter(
@@ -160,11 +177,16 @@ export default function HomeScreen() {
   const searching = query.trim().length > 0;
   const chips = useMemo(() => categoryCounts(tasks), [tasks]);
   const activeFilter = filter && chips.some((chip) => chip.id === filter) ? filter : null;
+  const byStatus = statusFilter === 'overdue'
+    ? tasks.filter((task) => dashboardStatus(task) === 'overdue')
+    : todaysTasks.filter((task) => dashboardStatus(task) === statusFilter);
   const listed = filterByCategory(
     searching
       ? searchTasks(tasks, query, categoryLabel).sort((a, b) => Number(a.completed) - Number(b.completed)
         || (b.dueDate ?? '').localeCompare(a.dueDate ?? ''))
-      : todayTasks,
+      : statusFilter
+        ? byStatus
+        : todayTasks,
     activeFilter,
   );
   const groups = groupByCategory(listed);
@@ -254,23 +276,31 @@ export default function HomeScreen() {
             {todaysTasks.length === 1 ? t('home.todayCountOne') : t('home.todayCount', { n: todaysTasks.length })}
             {upcomingCount ? ` · ${t('home.upcoming', { n: upcomingCount })}` : ''}
           </ThemedText>
-          <StatusBar counts={todayCounts} colors={theme} />
+          <StatusBar counts={dash} colors={theme} />
           <View style={styles.overviewMetrics}>
             {([
-              { key: 'completed', value: todayCounts.completed, color: theme.success },
-              { key: 'inProgress', value: todayCounts.inProgress, color: theme.warning },
-              { key: 'overdue', value: todayCounts.overdue + overdueCount, color: theme.danger },
-            ] as const).map((item) => (
-              <View key={item.key} style={styles.metric}>
-                <View style={styles.metricHead}>
-                  <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-                  <ThemedText style={[styles.metricValue, { color: item.color }]}>{item.value}</ThemedText>
-                </View>
-                <ThemedText themeColor="textSecondary" style={styles.metricLabel}>
-                  {t(HEALTH_KEY[item.key])}
-                </ThemedText>
-              </View>
-            ))}
+              { key: 'completed', value: dash.completed, color: theme.success },
+              { key: 'inProgress', value: dash.inProgress, color: theme.warning },
+              { key: 'overdue', value: dash.overdue, color: theme.danger },
+            ] as const).map((item) => {
+              const active = statusFilter === item.key;
+              return (
+                <Pressable
+                  key={item.key}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setStatusFilter(active ? null : item.key)}
+                  style={[styles.metric, { borderColor: active ? item.color : 'transparent', backgroundColor: active ? `${item.color}14` : 'transparent' }]}>
+                  <View style={styles.metricHead}>
+                    <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                    <ThemedText style={[styles.metricValue, { color: item.color }]}>{item.value}</ThemedText>
+                  </View>
+                  <ThemedText themeColor="textSecondary" style={styles.metricLabel}>
+                    {t(STATUS_KEY[item.key])}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -434,7 +464,17 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ThemedText style={styles.sectionTitle}>
+        {statusFilter && !searching ? (
+          <View style={styles.statusFilterRow}>
+            <ThemedText style={[styles.sectionTitle, styles.statusFilterTitle, { color: statusTint(statusFilter, theme) }]}>
+              {t('home.showingStatus', { status: t(STATUS_KEY[statusFilter]), n: listed.length })}
+            </ThemedText>
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setStatusFilter(null)}>
+              <ThemedText style={[styles.clearFilter, { color: theme.primary }]}>{t('home.showAll')}</ThemedText>
+            </Pressable>
+          </View>
+        ) : null}
+        <ThemedText style={[styles.sectionTitle, statusFilter && !searching ? styles.hidden : null]}>
           {searching
             ? listed.length === 1
               ? t('home.oneResult', { q: query.trim() })
@@ -443,7 +483,7 @@ export default function HomeScreen() {
               ? t('home.todaySchedule')
               : t('home.scheduleOn', { date: new Date(`${selectedDate}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }) })}
         </ThemedText>
-        {!searching && selectedDayTasks.length > 0 ? (
+        {!searching && !statusFilter && selectedDayTasks.length > 0 ? (
           <ThemedText themeColor="textSecondary" style={styles.daySummary}>
             {t('home.nOfComplete', { done: selectedDayCompleted, total: selectedDayTasks.length })}
           </ThemedText>
@@ -471,10 +511,10 @@ export default function HomeScreen() {
                   <ThemedText themeColor="textSecondary" style={styles.groupCount}>{group.tasks.length}</ThemedText>
                 </View>
                 {group.tasks.map((task) => {
-                  const health = taskHealth(task);
+                  const status = dashboardStatus(task);
                   return (
                   <View key={task.id} style={[styles.row, { backgroundColor: theme.card }]}>
-                    <View style={[styles.statusStripe, { backgroundColor: healthColor(health, theme) }]} />
+                    <View style={[styles.statusStripe, { backgroundColor: statusTint(status, theme) }]} />
                     <ThemedText themeColor="textSecondary" style={styles.time}>
                       {task.startTime ?? t('home.anytime')}
                       {searching && task.dueDate ? `\n${new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}` : ''}
@@ -486,8 +526,11 @@ export default function HomeScreen() {
                         {task.title}
                       </ThemedText>
                       <View style={styles.rowMeta}>
-                        <ThemedText style={[styles.rowStatus, { color: healthColor(health, theme) }]}>
-                          {task.status === 'in_progress' && !task.completed ? t('home.started') : t(HEALTH_KEY[health])}
+                        <ThemedText style={[styles.rowStatus, { color: statusTint(status, theme) }]}>
+                          {t(STATUS_KEY[status])}
+                          {statusFilter === 'overdue' && task.dueDate && task.dueDate !== today
+                            ? ` · ${new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}`
+                            : ''}
                         </ThemedText>
                         {task.contactPhone && !task.completed ? (
                           <ContactActions name={task.contactName} phone={task.contactPhone} compact />
@@ -632,7 +675,11 @@ const styles = StyleSheet.create({
   overviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   integrationsLink: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   overviewMetrics: { flexDirection: 'row', marginTop: 2 },
-  metric: { flex: 1, alignItems: 'center' },
+  metric: { flex: 1, alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 6, marginHorizontal: 3 },
+  statusFilterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  statusFilterTitle: { flex: 1 },
+  clearFilter: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', marginTop: -4 },
+  hidden: { display: 'none' },
   metricValue: { fontSize: 22, fontFamily: 'Poppins_700Bold' },
   metricLabel: { fontSize: 11, marginTop: 2 },
   workspace: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 16, paddingTop: 8, marginBottom: 16 },

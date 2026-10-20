@@ -148,6 +148,8 @@ export const sw: PartialTranslation = {
     notYou: 'Si wewe? Toka',
   },
   home: {
+    showingStatus: "{status} · kazi {n}",
+    showAll: "Onyesha zote",
     morning: 'Habari za asubuhi', afternoon: 'Habari za mchana', evening: 'Habari za jioni', there: 'rafiki',
     tellOrdina: 'Mwambie ORDINA cha kufanya...',
     searchPlaceholder: 'Tafuta kazi zako',

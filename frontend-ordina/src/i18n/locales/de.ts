@@ -148,6 +148,8 @@ export const de: PartialTranslation = {
     notYou: 'Nicht du? Abmelden',
   },
   home: {
+    showingStatus: "{status} · {n} Aufgaben",
+    showAll: "Alle zeigen",
     morning: 'Guten Morgen', afternoon: 'Guten Tag', evening: 'Guten Abend', there: 'du',
     tellOrdina: 'Sag ORDINA, was zu tun ist...',
     searchPlaceholder: 'Aufgaben durchsuchen',
