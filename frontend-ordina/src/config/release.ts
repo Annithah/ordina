@@ -28,8 +28,8 @@ export const FEATURES = {
   contacts: !STORE_BUILD,
   /** "Remind me when I arrive" (location). */
   arrivalReminders: !STORE_BUILD,
-  /** Photo / video to tasks (camera, gallery). */
-  mediaToTasks: !STORE_BUILD,
+  /** Photo / video to tasks (camera, gallery): the attach button in ORDINA AI. */
+  mediaToTasks: true,
   /** Busy times / events from Google Calendar. */
   googleCalendar: !STORE_BUILD,
   /** Accounts (name, email, 4-digit passkey). In offline mode they live on the phone. */

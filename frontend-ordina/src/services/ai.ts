@@ -1,7 +1,8 @@
 import { LOCAL_MODE } from '@/config/release';
 import { api, COLD_START_MS } from '@/services/api';
 import { withLaptop } from '@/services/device-session';
-import { confirmLocalPlan } from '@/services/local-tasks';
+import { knownCategory } from '@/features/categories';
+import { confirmLocalPlan, createLocalTask } from '@/services/local-tasks';
 import { useTasksStore } from '@/store/tasks-store';
 import type { CalendarBusyEvent } from '@/services/google-calendar';
 import type { Plan } from '@/types/plan';
@@ -86,8 +87,44 @@ export async function confirmPlan(planId: string, tasks: unknown[]) {
 }
 
 export async function confirmAiActions(payload: { tasks?: unknown[]; reschedule?: unknown; arrivalReminders?: unknown[] }) {
+  if (LOCAL_MODE) return saveProposedTasksOnPhone(payload.tasks ?? []);
   const { data } = await api.post('/api/ai/confirm', payload, { timeout: 30000 });
   return data;
+}
+
+type Proposed = {
+  title?: string;
+  description?: string;
+  date?: string;
+  startTime?: string;
+  durationMinutes?: number;
+  priority?: string;
+  category?: string;
+  reminder?: boolean;
+  contactName?: string;
+  contactPhone?: string;
+};
+
+/** Offline mode: tasks ORDINA found (e.g. in a photo) are saved in the phone's database. */
+async function saveProposedTasksOnPhone(tasks: unknown[]) {
+  const created = [];
+  for (const raw of tasks as Proposed[]) {
+    if (!raw?.title) continue;
+    const task = await createLocalTask({
+      title: raw.title,
+      description: raw.description ?? '',
+      dueDate: raw.date || localDateKey(),
+      startTime: raw.startTime || undefined,
+      duration: raw.durationMinutes || undefined,
+      priority: raw.priority === 'high' || raw.priority === 'low' ? raw.priority : 'medium',
+      // Only categories ORDINA knows; anything else would make saving fail.
+      category: knownCategory(raw.category) ?? undefined,
+      completed: false,
+    });
+    created.push({ ...task, reminder: Boolean(raw.reminder), contactName: raw.contactName });
+  }
+  await useTasksStore.getState().loadTasks();
+  return { created };
 }
 
 export async function interpretFromMedia(payload: {
@@ -97,6 +134,10 @@ export async function interpretFromMedia(payload: {
   timezone?: string;
   calendarEvents?: CalendarBusyEvent[];
 }) {
+  // Offline mode: the laptop only accepts requests carrying this phone's device token.
+  if (LOCAL_MODE) {
+    return withLaptop(async (headers) => (await api.post('/api/ai/from-media', payload, { timeout: 180000, headers })).data);
+  }
   const { data } = await api.post('/api/ai/from-media', payload, { timeout: 180000 });
   return data;
 }
