@@ -149,6 +149,8 @@ export const fr: PartialTranslation = {
     notYou: 'Ce n’est pas vous ? Se déconnecter',
   },
   home: {
+    showingStatus: "{status} · {n} tâches",
+    showAll: "Tout afficher",
     morning: 'Bonjour', afternoon: 'Bon après-midi', evening: 'Bonsoir', there: 'à vous',
     tellOrdina: 'Dites à ORDINA quoi faire...',
     searchPlaceholder: 'Rechercher vos tâches',

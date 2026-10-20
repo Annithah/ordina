@@ -186,6 +186,8 @@ export const en = {
     notYou: 'Not you? Sign out',
   },
   home: {
+    showingStatus: "{status} · {n} tasks",
+    showAll: "Show all",
     morning: 'Good morning',
     afternoon: 'Good afternoon',
     evening: 'Good evening',

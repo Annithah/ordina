@@ -148,6 +148,8 @@ export const zh: PartialTranslation = {
     notYou: '不是您？退出登录',
   },
   home: {
+    showingStatus: "{status} · {n} 项任务",
+    showAll: "显示全部",
     morning: '早上好', afternoon: '下午好', evening: '晚上好', there: '朋友',
     tellOrdina: '告诉 ORDINA 要做什么...',
     searchPlaceholder: '搜索任务',

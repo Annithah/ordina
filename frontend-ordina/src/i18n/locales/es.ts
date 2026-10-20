@@ -148,6 +148,8 @@ export const es: PartialTranslation = {
     notYou: '¿No eres tú? Cerrar sesión',
   },
   home: {
+    showingStatus: "{status} · {n} tareas",
+    showAll: "Ver todas",
     morning: 'Buenos días', afternoon: 'Buenas tardes', evening: 'Buenas noches', there: 'amigo',
     tellOrdina: 'Dile a ORDINA qué hacer...',
     searchPlaceholder: 'Busca tus tareas',

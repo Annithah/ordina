@@ -46,6 +46,20 @@ export function taskHealth(task: Task, now = new Date()): TaskHealth {
   return 'planned';
 }
 
+/**
+ * Dashboard state of a task: completed, overdue (its day or time has passed), in progress
+ * (the user pressed Start), or still to do. Unlike taskHealth, a task due today is only
+ * "in progress" once it has been started.
+ */
+export type DashboardStatus = 'completed' | 'inProgress' | 'overdue' | 'todo';
+
+export function dashboardStatus(task: Task, now = new Date()): DashboardStatus {
+  if (task.completed) return 'completed';
+  if (taskHealth(task, now) === 'overdue') return 'overdue';
+  if (task.status === 'in_progress') return 'inProgress';
+  return 'todo';
+}
+
 /** The three states the task list shows: pending, completed, or overdue. */
 export type TaskStatusLabel = 'pending' | 'completed' | 'overdue';
 

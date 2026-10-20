@@ -148,6 +148,8 @@ export const hi: PartialTranslation = {
     notYou: 'आप नहीं हैं? साइन आउट करें',
   },
   home: {
+    showingStatus: "{status} · {n} काम",
+    showAll: "सभी दिखाएँ",
     morning: 'सुप्रभात', afternoon: 'नमस्ते', evening: 'शुभ संध्या', there: 'दोस्त',
     tellOrdina: 'ORDINA को बताइए क्या करना है...',
     searchPlaceholder: 'अपने काम खोजें',
