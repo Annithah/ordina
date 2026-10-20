@@ -3,17 +3,32 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
 import { routeAfterAuth } from '@/utils/after-auth';
 
 WebBrowser.maybeCompleteAuthSession();
 
+// The hook needs some client id even when Google sign-in isn't set up; it is never used then.
+const PLACEHOLDER_CLIENT = '000000000000-placeholder.apps.googleusercontent.com';
+
+/** Name and email straight from Google with the user's access token (no ORDINA server involved). */
+async function googleProfile(accessToken: string) {
+  const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(`Google profile ${response.status}`);
+  return (await response.json()) as { name?: string; email?: string };
+}
+
 export function SocialAuthButtons() {
   const theme = useTheme();
+  const { t } = useI18n();
   const isDark = theme.background === '#000000';
   const [busy, setBusy] = useState<'google' | 'apple' | null>(null);
   const [appleAvailable, setAppleAvailable] = useState(false);
@@ -22,11 +37,10 @@ export function SocialAuthButtons() {
     android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
     default: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID,
   });
-  const googleRequestClient = '000000000000-placeholder.apps.googleusercontent.com';
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || googleRequestClient,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || googleRequestClient,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || googleRequestClient,
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || PLACEHOLDER_CLIENT,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || PLACEHOLDER_CLIENT,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || PLACEHOLDER_CLIENT,
   });
 
   useEffect(() => {
@@ -38,30 +52,25 @@ export function SocialAuthButtons() {
     if (!response) return;
     if (response.type !== 'success') {
       setBusy(null);
-      if (response.type === 'error') {
-        Alert.alert('Google', response.error?.message || 'Google sign-in failed. Please try again.');
-      }
+      if (response.type === 'error') toast.info(t('auth.google.failed'));
       return;
     }
-    const idToken = response.params.id_token || response.authentication?.idToken;
-    if (!idToken) {
+    const accessToken = response.authentication?.accessToken ?? response.params.access_token;
+    if (!accessToken) {
       setBusy(null);
-      Alert.alert('Google', 'Google did not return an ID token.');
+      toast.info(t('auth.google.failed'));
       return;
     }
-    void useAuthStore
-      .getState()
-      .signInWithGoogle(idToken)
+    void googleProfile(accessToken)
+      .then((profile) => useAuthStore.getState().signInWithProvider({ provider: 'google', name: profile.name, email: profile.email }))
       .then(() => routeAfterAuth())
-      .catch((error: any) => {
-        Alert.alert('Google', error?.response?.data?.message || error?.message || 'Google sign-in failed.');
-      })
+      .catch(() => toast.info(t('auth.google.failed')))
       .finally(() => setBusy(null));
-  }, [response]);
+  }, [response, t]);
 
   async function onGoogle() {
     if (!googleClientId || !request) {
-      Alert.alert('Coming soon', 'Continue with Google will be available very soon. For now, please continue with email.');
+      toast.info(t('auth.google.notReady'));
       return;
     }
     setBusy('google');
@@ -70,12 +79,13 @@ export function SocialAuthButtons() {
       if (result.type !== 'success') setBusy(null);
     } catch {
       setBusy(null);
+      toast.info(t('auth.google.failed'));
     }
   }
 
   async function onApple() {
     if (!appleAvailable) {
-      Alert.alert('Coming soon', 'Continue with Apple will be available very soon. For now, please continue with email.');
+      toast.info(t('auth.apple.iphoneOnly'));
       return;
     }
     setBusy('apple');
@@ -86,18 +96,16 @@ export function SocialAuthButtons() {
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
       });
-      if (!credential.identityToken) {
-        Alert.alert('Apple', 'Apple did not return an identity token.');
-        return;
-      }
-      await useAuthStore.getState().signInWithApple({
-        identityToken: credential.identityToken,
-        fullName: credential.fullName,
+      const name = [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(' ');
+      await useAuthStore.getState().signInWithProvider({
+        provider: 'apple',
+        name,
+        email: credential.email,
+        appleUserId: credential.user,
       });
       routeAfterAuth();
     } catch (error: any) {
-      if (error?.code === 'ERR_REQUEST_CANCELED') return;
-      Alert.alert('Apple', error?.response?.data?.message || error?.message || 'Apple sign-in failed.');
+      if (error?.code !== 'ERR_REQUEST_CANCELED') toast.info(t('auth.apple.failed'));
     } finally {
       setBusy(null);
     }
@@ -118,7 +126,7 @@ export function SocialAuthButtons() {
         ) : (
           <>
             <Ionicons name="logo-google" size={20} color="#EA4335" />
-            <ThemedText style={styles.label}>Continue with Google</ThemedText>
+            <ThemedText style={styles.label}>{t('auth.continueGoogle')}</ThemedText>
           </>
         )}
       </Pressable>
@@ -142,7 +150,7 @@ export function SocialAuthButtons() {
             { backgroundColor: isDark ? '#FFFFFF' : '#000000', borderColor: isDark ? '#FFFFFF' : '#000000', opacity: pressed ? 0.8 : 1 },
           ]}>
           <Ionicons name="logo-apple" size={20} color={isDark ? '#000000' : '#FFFFFF'} />
-          <ThemedText style={[styles.label, { color: isDark ? '#000000' : '#FFFFFF' }]}>Continue with Apple</ThemedText>
+          <ThemedText style={[styles.label, { color: isDark ? '#000000' : '#FFFFFF' }]}>{t('auth.continueApple')}</ThemedText>
         </Pressable>
       )}
     </View>
