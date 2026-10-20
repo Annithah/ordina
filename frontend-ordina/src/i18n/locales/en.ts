@@ -211,6 +211,7 @@ export const en = {
     completed: 'Completed',
     inProgress: 'In progress',
     overdue: 'Overdue',
+    planned: 'Planned',
     incomplete: 'Incomplete / overdue',
     productivity: 'Productivity',
     monthToDate: 'Month to date',
