@@ -13,8 +13,12 @@ export type IntegrationId = 'contacts' | 'calendar' | 'microphone' | 'notificati
 
 export type PermissionState = 'granted' | 'denied' | 'undetermined' | 'unavailable';
 
+/** The open chat's last messages (see features/chat-groups contextWindow). */
+export type ChatContext = { role: 'user' | 'assistant'; content: string }[];
+
 export async function interpretInstruction(payload: {
   message: string;
+  conversation?: ChatContext;
   timezone?: string;
   contacts?: { name: string; phone?: string }[];
   calendarEvents?: CalendarBusyEvent[];
@@ -28,6 +32,7 @@ export async function requestPlan(payload: {
   message: string;
   answers?: { question: string; answer: string }[];
   keepTasks?: unknown[];
+  conversation?: ChatContext;
 }) {
   const now = new Date();
   const body = {
@@ -128,18 +133,34 @@ async function saveProposedTasksOnPhone(tasks: unknown[]) {
   return { created };
 }
 
-export async function interpretFromMedia(payload: {
-  media: string;
-  mimeType: string;
+export type UploadFile = { data: string; mimeType: string; name: string };
+
+/**
+ * Photos and files -> tasks (or an answer), through the ORDINA server only (never straight to
+ * Gemini). `onProgress` gets 0..1 while the files upload.
+ */
+export async function interpretFromFiles(payload: {
+  files: UploadFile[];
   note?: string;
   timezone?: string;
   calendarEvents?: CalendarBusyEvent[];
-}) {
-  // Offline mode: the laptop only accepts requests carrying this phone's device token.
+  conversation?: ChatContext;
+}, onProgress?: (fraction: number) => void) {
+  const body = {
+    ...payload,
+    // Offline mode: the laptop has no copy of the tasks, so send the busy times for overlap checks.
+    ...(LOCAL_MODE ? { existingTasks: localPlanningContext(localDateKey()).existingTasks } : {}),
+  };
+  const config = {
+    timeout: 180_000,
+    onUploadProgress: (event: { loaded: number; total?: number }) => {
+      if (event.total) onProgress?.(Math.min(1, event.loaded / event.total));
+    },
+  };
   if (LOCAL_MODE) {
-    return withLaptop(async (headers) => (await api.post('/api/ai/from-media', payload, { timeout: 180000, headers })).data);
+    return withLaptop(async (headers) => (await api.post('/api/ai/from-media', body, { ...config, headers })).data);
   }
-  const { data } = await api.post('/api/ai/from-media', payload, { timeout: 180000 });
+  const { data } = await api.post('/api/ai/from-media', body, config);
   return data;
 }
 
@@ -153,13 +174,6 @@ export async function transcribeAudio(audio: string, mimeType?: string) {
 
 export async function deleteAccount() {
   await api.delete('/api/auth/account');
-}
-
-export async function fetchAiMessages() {
-  // Offline mode keeps the conversation for the current session only.
-  if (LOCAL_MODE) return [];
-  const { data } = await api.get('/api/ai/messages');
-  return data.messages ?? [];
 }
 
 export async function requestPasswordReset(email: string) {
