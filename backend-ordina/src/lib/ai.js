@@ -6,7 +6,7 @@ Return ONLY valid JSON with this shape:
 {
   "intent": "create_tasks" | "reschedule" | "recommend_now" | "overwhelm" | "clarify" | "answer" | "conflict" | "arrival_reminder",
   "message": "short user-facing summary",
-  "tasks": [{ "title": "", "description": "", "date": "YYYY-MM-DD", "startTime": "HH:MM", "durationMinutes": 60, "priority": "low|medium|high", "reminder": false, "projectName": "", "category": "work|personal|health|learning", "contactName": "", "contactPhone": "" }],
+  "tasks": [{ "title": "", "description": "", "date": "YYYY-MM-DD", "startTime": "HH:MM", "durationMinutes": 60, "priority": "low|medium|high", "reminder": false, "projectName": "", "category": "work|meetings|projects|emails|study|classes|assignments|exams|reading|personal|errands|home|hobbies|health|exercise|medical|nutrition|family|calls|events|finance|bills|savings|shopping|spiritual|prayer|worship|other", "contactName": "", "contactPhone": "" }],
   "arrivalReminders": [{ "title": "", "placeName": "home|work|named place" }],
   "reschedule": { "taskId": "", "titleHint": "", "date": "YYYY-MM-DD", "startTime": "HH:MM" },
   "clarification": "",
@@ -513,34 +513,37 @@ async function interpretMessage({ message: rawMessage, timezone, existingTasks, 
   }
 }
 
-async function interpretMedia({ media, mimeType, note, timezone, existingTasks }) {
+const KIND_LABEL = { image: 'photo', video: 'video', pdf: 'PDF', docx: 'Word document', text: 'text file' };
+
+/**
+ * Tasks (or an answer) from up to 5 attached files: photos of lists, whiteboards, timetables or
+ * posters, PDFs, Word documents and text files. `parts` come from lib/media.js.
+ */
+async function interpretFiles({ parts, kinds, names = [], note, timezone, existingTasks, conversation }) {
   const today = toDateKey(new Date(), timezone);
-  const isVideo = String(mimeType || '').startsWith('video/');
-  const instruction = isVideo
-    ? 'Watch this video (including anything said aloud and any text shown) and extract every task, appointment or plan the user mentions.'
-    : 'Extract tasks from this photo (whiteboard, screenshot, handwritten list, flyer, invitation, or note).';
+  const described = kinds.map((kind, index) => `${KIND_LABEL[kind] || 'file'}${names[index] ? ` "${String(names[index]).slice(0, 80)}"` : ''}`).join(', ');
+  const several = kinds.length > 1;
+  const instruction = `The user attached ${several ? `${kinds.length} files` : 'a file'}: ${described}. Read ${several ? 'all of them' : 'it'} carefully: `
+    + 'handwritten to-do lists, whiteboards, screenshots, timetables, exam schedules, event posters, assignments, project plans and meeting notes. '
+    + 'Extract every task, appointment, deadline and plan with the right dates and times (resolve them from "today"). '
+    + 'For documents, put a two or three sentence summary in "message".';
   const instructionNote = note ? String(note).slice(0, 500) : '';
   const guidance = instructionNote
-    ? `The user's instruction about this ${isVideo ? 'video' : 'image'} is: "${instructionNote}". Follow it exactly. Only create tasks if the instruction asks you to plan, schedule, remind or create tasks; if it asks a question, answer it with intent=answer. Ask a short follow-up (intent=clarify) if a needed day or time is missing.`
-    : `The user attached this ${isVideo ? 'video' : 'image'} WITHOUT any instruction. Do NOT create tasks. Use intent=clarify: describe in one short sentence what you see that could be planned, then ask what they would like you to do. Offer suggestedReplies such as "Create tasks from this", "Remind me about it tomorrow", "Just summarise it".`;
-  const context = JSON.stringify({ today, timezone: timezone || 'UTC', existingTasks: (existingTasks || []).slice(0, 60) });
+    ? `The user's instruction is: "${instructionNote}". Follow it exactly. Only create tasks if it asks you to plan, schedule, remind or create tasks; if it asks a question, answer it with intent=answer. Ask a short follow-up (intent=clarify) if a needed day or time is missing.`
+    : 'The user sent the file(s) WITHOUT any text. Create the tasks you find (intent=create_tasks) and summarise what the file is in "message". If nothing can be planned, use intent=answer and describe it in one or two sentences.';
+  const context = JSON.stringify({
+    today,
+    timezone: timezone || 'UTC',
+    existingTasks: (existingTasks || []).slice(0, 60),
+    conversation: (conversation || []).slice(-10),
+  });
   const parsed = await callGemini([
-    {
-      role: 'user',
-      parts: [
-        { text: `${SYSTEM_PROMPT}\n\n${instruction}\n${guidance}\n${context}` },
-        { inlineData: { mimeType: mimeType || 'image/jpeg', data: media } },
-      ],
-    },
+    { role: 'user', parts: [{ text: `${SYSTEM_PROMPT}\n\n${instruction}\n${guidance}\n${context}` }, ...parts] },
   ]);
-  if (!instructionNote) {
-    parsed.intent = 'clarify';
-    parsed.tasks = [];
-  }
   if (!parsed.tasks?.length && parsed.intent !== 'clarify' && parsed.intent !== 'answer') {
-    parsed.intent = parsed.intent || 'create_tasks';
-    parsed.message = parsed.message || `I could not find tasks in that ${isVideo ? 'video' : 'image'}. Try a clearer ${isVideo ? 'clip' : 'photo'}.`;
-    parsed.tasks = parsed.tasks || [];
+    parsed.intent = 'answer';
+    parsed.message = parsed.message || `I could not find tasks in ${several ? 'these files' : 'that file'}. Tell me what you would like me to do with ${several ? 'them' : 'it'}.`;
+    parsed.tasks = [];
   }
   return applyScheduleGuards(parsed, existingTasks || []);
 }
@@ -567,4 +570,4 @@ async function transcribe(base64Audio, mimeType) {
   return String(text || '').trim();
 }
 
-module.exports = { interpret, interpretMedia, transcribe, durationMinutes, localInterpret };
+module.exports = { interpret, interpretFiles, transcribe, durationMinutes, localInterpret };

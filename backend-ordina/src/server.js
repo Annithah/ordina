@@ -9,6 +9,7 @@ const { signToken, requireUser } = require('./lib/auth');
 const { sendMail } = require('./lib/mail');
 const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
 const ai = require('./lib/ai');
+const media = require('./lib/media');
 const schedule = require('./lib/schedule');
 const taskValidation = require('./lib/task-validation');
 const gemini = require('./lib/gemini');
@@ -31,7 +32,8 @@ app.use(cors({
   credentials: true,
 }));
 // Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
-app.use('/api/ai', express.json({ limit: '30mb' }));
+// Up to 5 files of 10 MB, base64 encoded.
+app.use('/api/ai', express.json({ limit: '75mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 // Method, path, status and timing only: no request bodies, so no task text or prompts in logs.
@@ -686,6 +688,18 @@ async function notify(userId, title, message, type, relatedType, relatedId) {
 }
 
 /** Recent chat (last 3 hours) so ORDINA can understand answers to its own questions. */
+/**
+ * The open chat's last messages, sent by the phone (it keeps the history). Only this chat is
+ * used, never older conversations; each message is shortened.
+ */
+function clientConversation(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((item) => item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string')
+    .slice(-10)
+    .map((item) => ({ role: item.role, content: item.content.slice(0, 600) }));
+}
+
 async function recentConversation(userId) {
   const rows = await prisma.aiMessage.findMany({
     where: { userId, createdAt: { gte: new Date(Date.now() - 3 * 60 * 60 * 1000) } },
@@ -829,7 +843,7 @@ app.post('/api/ai/interpret', async (req, res) => {
       timezone: req.body?.timezone,
       existingTasks,
       contacts: req.body?.contacts,
-      conversation: await recentConversation(userId),
+      conversation: clientConversation(req.body?.conversation) ?? await recentConversation(userId),
     });
     await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
     await prisma.aiMessage.create({
@@ -841,34 +855,59 @@ app.post('/api/ai/interpret', async (req, res) => {
   }
 });
 
+const consumeAiFiles = media.createFileLimiter();
+
+/**
+ * Photos and files -> tasks. Files are checked by their content, read in memory and never
+ * stored; only the user's note (or a [file] label) is kept in the chat log.
+ */
 async function interpretMediaRoute(req, res) {
   const userId = requireUser(req, res);
   if (!userId) return;
-  const media = String(req.body?.media || req.body?.image || '').trim();
-  if (!media) return res.status(400).json({ message: 'An image or video is required.' });
-  const mimeType = String(req.body?.mimeType || 'image/jpeg');
-  if (!/^(image|video)\//.test(mimeType)) return res.status(400).json({ message: 'Only images and videos are supported.' });
+  const files = media.filesFromBody(req.body);
+  if (!consumeAiFiles(userId, Math.max(1, files.length))) {
+    return res.status(429).json({ code: 'RATE_LIMITED', message: 'You have sent many files in a short time. Please wait a minute and try again.' });
+  }
+  if (!gemini.isConfigured()) {
+    return res.status(503).json({ message: AI_FRIENDLY.AI_NOT_CONFIGURED, code: 'AI_NOT_CONFIGURED' });
+  }
   try {
+    const { parts, kinds } = await media.prepareFiles(files);
     await materializeRecurrence(userId);
     const existingTasks = [
       ...await ownedTasks(userId),
       ...calendarBusyTasks(req.body?.calendarEvents),
+      ...clientBusyTasks(req.body?.existingTasks),
     ];
-    const result = await ai.interpretMedia({
-      media,
-      mimeType,
-      note: req.body?.note,
-      timezone: req.body?.timezone,
-      existingTasks,
-    });
-    const label = mimeType.startsWith('video/') ? '[video]' : '[image]';
-    await prisma.aiMessage.create({ data: { userId, role: 'user', content: req.body?.note ? `${label} ${req.body.note}` : label } });
+    let result;
+    try {
+      result = await ai.interpretFiles({
+        parts,
+        kinds,
+        names: files.map((file) => file.name),
+        note: req.body?.note,
+        timezone: req.body?.timezone,
+        existingTasks,
+        conversation: clientConversation(req.body?.conversation) ?? undefined,
+      });
+    } catch (error) {
+      // Gemini refused or could not parse the file(s).
+      if (error.status && error.status < 500) {
+        return res.status(422).json({ code: 'FILE_UNREADABLE', message: 'ORDINA AI could not read that file. Try a clearer photo or another format.' });
+      }
+      throw error;
+    }
+    const label = `[${kinds.join(', ')}]`;
+    await prisma.aiMessage.create({ data: { userId, role: 'user', content: req.body?.note ? `${label} ${String(req.body.note).slice(0, 500)}` : label } });
     await prisma.aiMessage.create({
       data: { userId, role: 'assistant', content: result.message || '', actions: JSON.stringify(result) },
     });
     return res.json(result);
   } catch (error) {
-    return res.status(error.status || 500).json({ message: error.message });
+    if (error instanceof media.MediaError) return res.status(error.status).json({ code: error.code, message: error.message });
+    // Log the failure type only, never the files or the user's text.
+    console.error('AI files failed:', error.code || error.status || 'error');
+    return res.status(error.status || 500).json({ code: 'AI_ERROR', message: 'ORDINA AI could not read that just now. Please try again.' });
   }
 }
 
@@ -1100,6 +1139,7 @@ app.post('/api/ai/plan', async (req, res) => {
       clientTime: req.body?.localTime,
       existingTasks,
       profile,
+      conversation: clientConversation(req.body?.conversation) ?? undefined,
     });
     await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
     await prisma.aiMessage.create({
