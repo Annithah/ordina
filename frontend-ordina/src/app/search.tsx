@@ -6,13 +6,23 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { useProjectsStore } from '@/store/projects-store';
 import { useTasksStore } from '@/store/tasks-store';
 import { friendlyError } from '@/utils/task-validation';
 
 export default function SearchScreen() {
   const theme = useTheme();
+  const { t } = useI18n();
   const { tasks, toggleComplete, loadTasks } = useTasksStore();
+  const optionLabel: Record<string, string> = {
+    All: t('home.all'),
+    'In Progress': t('home.inProgress'),
+    Completed: t('home.completed'),
+    High: t('task.high'),
+    Medium: t('task.medium'),
+    Low: t('task.low'),
+  };
   const { projects, loadProjects } = useProjectsStore();
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('All');
@@ -42,7 +52,7 @@ export default function SearchScreen() {
   }
 
   const projectOptions = ['All', ...projects.map((project) => project.id)];
-  const projectLabel = projectId === 'All' ? 'All' : projects.find((project) => project.id === projectId)?.name || 'All';
+  const projectLabel = projectId === 'All' ? t('home.all') : projects.find((project) => project.id === projectId)?.name || t('home.all');
 
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.background }]} edges={['top', 'bottom']}>
@@ -52,19 +62,19 @@ export default function SearchScreen() {
           value={query}
           onChangeText={setQuery}
           autoFocus
-          placeholder="Search tasks"
+          placeholder={t('tasksTab.searchTasks')}
           placeholderTextColor={theme.textSecondary}
           style={[styles.input, { color: theme.text }]}
         />
       </View>
 
       <View style={styles.filters}>
-        <ThemedText style={styles.filterTitle}>FILTERS</ThemedText>
+        <ThemedText style={styles.filterTitle}>{t('tasksTab.filters')}</ThemedText>
         {[
-          { label: 'By Status', value: status, set: () => setStatus(cycle(status, ['All', 'In Progress', 'Completed'])) },
-          { label: 'By Priority', value: priority, set: () => setPriority(cycle(priority, ['All', 'High', 'Medium', 'Low'])) },
+          { label: t('tasksTab.byStatus'), value: optionLabel[status], set: () => setStatus(cycle(status, ['All', 'In Progress', 'Completed'])) },
+          { label: t('tasksTab.byPriority'), value: optionLabel[priority], set: () => setPriority(cycle(priority, ['All', 'High', 'Medium', 'Low'])) },
           {
-            label: 'By Project',
+            label: t('tasksTab.byProject'),
             value: projectLabel,
             set: () => setProjectId(cycle(projectId, projectOptions)),
           },
@@ -80,13 +90,13 @@ export default function SearchScreen() {
       </View>
 
       <ThemedText themeColor="textSecondary" style={styles.group}>
-        MATCHING TASKS ({matches.length})
+        {t('tasksTab.matching', { n: matches.length })}
       </ThemedText>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}>
         {matches.map((task) => (
           <View key={task.id} style={[styles.task, { backgroundColor: theme.card }]}>
             <Pressable
-              onPress={() => void toggleComplete(task.id).catch((error) => toast.error(friendlyError(error, 'Could not update the task.')))}
+              onPress={() => void toggleComplete(task.id).catch((error) => toast.error(friendlyError(error, t('home.updateFailed'))))}
               style={[
                 styles.box,
                 {
@@ -99,13 +109,13 @@ export default function SearchScreen() {
             <View style={{ flex: 1 }}>
               <ThemedText style={task.completed ? styles.strike : undefined}>{task.title}</ThemedText>
               <ThemedText themeColor="textSecondary" style={styles.meta}>
-                {task.priority} • {task.dueDate || 'No date'}
+                {t(`task.${task.priority}`)} • {task.dueDate || t('tasksTab.noDate')}
               </ThemedText>
             </View>
           </View>
         ))}
         {matches.length === 0 ? (
-          <ThemedText themeColor="textSecondary">No tasks match that search.</ThemedText>
+          <ThemedText themeColor="textSecondary">{t('tasksTab.noMatch')}</ThemedText>
         ) : null}
       </ScrollView>
     </SafeAreaView>

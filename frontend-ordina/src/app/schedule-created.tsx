@@ -4,14 +4,18 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useCategoryName } from '@/components/category-ui';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 import { useTasksStore } from '@/store/tasks-store';
 import { href } from '@/utils/href';
 
 export default function ScheduleCreatedScreen() {
   const theme = useTheme();
+  const { t, locale } = useI18n();
+  const categoryName = useCategoryName();
   const params = useLocalSearchParams<{ taskIds?: string | string[] }>();
   const allTasks = useTasksStore((state) => state.tasks);
   const taskIds = Array.isArray(params.taskIds) ? params.taskIds : (params.taskIds || '').split(',');
@@ -25,7 +29,7 @@ export default function ScheduleCreatedScreen() {
     [allTasks, params.taskIds],
   );
   const scheduleDate = tasks[0]?.dueDate
-    ? new Date(`${tasks[0].dueDate}T12:00:00`).toLocaleDateString(undefined, {
+    ? new Date(`${tasks[0].dueDate}T12:00:00`).toLocaleDateString(locale, {
       month: 'long',
       day: 'numeric',
     })
@@ -38,28 +42,28 @@ export default function ScheduleCreatedScreen() {
           <View style={[styles.check, { backgroundColor: theme.success }]}>
             <Ionicons name="checkmark" size={36} color="#FFFFFF" />
           </View>
-          <ThemedText style={styles.title}>Schedule Created</ThemedText>
+          <ThemedText style={styles.title}>{t('tasksTab.scheduleCreated')}</ThemedText>
           <ThemedText themeColor="textSecondary">
             {tasks.length
-              ? `${tasks.length} ${tasks.length === 1 ? 'task' : 'tasks'} saved${scheduleDate ? ` for ${scheduleDate}` : ''}`
-              : 'Your confirmed changes have been saved.'}
+              ? `${tasks.length === 1 ? t('tasksTab.savedCountOne') : t('tasksTab.savedCount', { n: tasks.length })}${scheduleDate ? t('tasksTab.savedFor', { date: scheduleDate }) : ''}`
+              : t('tasksTab.changesConfirmed')}
           </ThemedText>
         </View>
-        <ThemedText themeColor="textSecondary" style={styles.group}>YOUR PLAN</ThemedText>
+        <ThemedText themeColor="textSecondary" style={styles.group}>{t('tasksTab.yourPlan')}</ThemedText>
         {tasks.map((task) => (
           <View key={task.id} style={styles.row}>
             <View style={styles.when}>
-              <ThemedText style={styles.time}>{task.startTime || 'Any time'}</ThemedText>
+              <ThemedText style={styles.time}>{task.startTime || t('task.anytime')}</ThemedText>
               <ThemedText themeColor="textSecondary">
                 {task.dueDate
-                  ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                  ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
                   : ''}
               </ThemedText>
             </View>
             <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: theme.primary }]}>
               <ThemedText style={styles.cardTitle}>{task.title}</ThemedText>
               <ThemedText themeColor="textSecondary">
-                {task.category.charAt(0).toUpperCase() + task.category.slice(1)}
+                {categoryName(task.category)}
                 {task.duration ? ` · ${task.duration}` : ''}
               </ThemedText>
             </View>
@@ -72,9 +76,9 @@ export default function ScheduleCreatedScreen() {
         ) : null}
       </ScrollView>
       <View style={styles.footer}>
-        <PrimaryButton label="View Calendar" onPress={() => router.replace(href('/calendar'))} />
+        <PrimaryButton label={t('tasksTab.viewCalendar')} onPress={() => router.replace(href('/calendar'))} />
         <Pressable onPress={() => router.replace('/ai')} style={styles.changes}>
-          <ThemedText>Make Changes</ThemedText>
+          <ThemedText>{t('tasksTab.makeChanges')}</ThemedText>
         </Pressable>
       </View>
     </SafeAreaView>

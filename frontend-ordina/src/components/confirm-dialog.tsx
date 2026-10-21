@@ -2,6 +2,7 @@ import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from 'react-nat
 
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
+import { useI18n } from '@/providers/i18n-provider';
 
 type ConfirmDialogProps = {
   visible: boolean;
@@ -16,6 +17,7 @@ type ConfirmDialogProps = {
 
 /** In-app confirmation (React Native's Alert buttons are not supported on web). */
 export function ConfirmDialog({ visible, title, message, confirmLabel, destructive, busy, onConfirm, onCancel }: ConfirmDialogProps) {
+  const { t } = useI18n();
   const theme = useTheme();
   const tint = destructive ? theme.danger : theme.primary;
   return (
@@ -30,7 +32,7 @@ export function ConfirmDialog({ visible, title, message, confirmLabel, destructi
               disabled={busy}
               onPress={onCancel}
               style={[styles.button, { backgroundColor: theme.backgroundSelected }]}>
-              <ThemedText style={styles.buttonText}>Cancel</ThemedText>
+              <ThemedText style={styles.buttonText}>{t('common.cancel')}</ThemedText>
             </Pressable>
             <Pressable
               accessibilityRole="button"

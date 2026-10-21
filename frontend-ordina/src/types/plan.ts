@@ -47,4 +47,11 @@ export type Plan = {
 };
 
 /** A task in the preview, with the fields the user has changed. */
-export type DraftTask = PlanTask & { key: string; edited: Partial<Record<PlanField | 'title', true>> };
+export type DraftTask = PlanTask & {
+  key: string;
+  edited: Partial<Record<PlanField | 'title', true>>;
+  /** The category the task will be saved in; the user can change it in the preview. */
+  category: string;
+  /** What ORDINA suggested (null when nothing fitted), so a change can be learned. */
+  suggestedCategory: string | null;
+};

@@ -1,13 +1,23 @@
 import { create } from 'zustand';
 import { Alert } from 'react-native';
 
+import { LOCAL_MODE } from '@/config/release';
 import { api } from '@/services/api';
+import {
+  createLocalTask,
+  deleteLocalTask,
+  listLocalTasks,
+  setLocalTaskCompleted,
+  updateLocalTask,
+} from '@/services/local-tasks';
 import { cancelTaskReminder } from '@/services/notifications';
+import { normalizeCategory } from '@/features/categories';
 import { friendlyError } from '@/utils/task-validation';
 
 export type Priority = 'low' | 'medium' | 'high';
 export type TaskStatus = 'todo' | 'in_progress' | 'completed';
-export type Category = 'work' | 'personal' | 'health' | 'learning' | 'design' | 'database';
+/** A category id from features/categories (e.g. "work", "exams", "bills"). */
+export type Category = string;
 
 export interface Task {
   id: string;
@@ -41,6 +51,8 @@ interface TasksState {
   loading: boolean;
   /** Last load error; the previous list stays visible so a flaky network never looks like "no tasks". */
   loadError: string | null;
+  /** The technical reason of the last load error, shown small so problems can be reported. */
+  loadErrorDetail: string | null;
   loadTasks: () => Promise<void>;
   getTaskById: (id: string) => Task | undefined;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>;
@@ -61,7 +73,7 @@ function normalizeTask(task: any): Task {
     description: task.description ?? '',
     status: task.status === 'completed' ? 'completed' : task.status === 'in_progress' ? 'in_progress' : 'todo',
     priority: task.priority === 'high' || task.priority === 3 ? 'high' : task.priority === 'medium' || task.priority === 2 ? 'medium' : 'low',
-    category: (task.category ?? 'work') as Category,
+    category: normalizeCategory(task.category),
     projectId: task.projectId ? String(task.projectId) : undefined,
     dueDate: task.dueDate ?? task.due_at ?? undefined,
     startTime: task.startTime ?? undefined,
@@ -85,35 +97,48 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
   loading: true,
   loadError: null,
+  loadErrorDetail: null,
 
   getTaskById: (id) => get().tasks.find((task) => task.id === id),
 
   loadTasks: async () => {
     try {
-      const { data } = await api.get('/api/tasks');
-      const tasks = Array.isArray(data?.tasks) ? data.tasks.map(normalizeTask) : [];
-      set({ tasks, loading: false, loadError: null });
+      // Offline mode: tasks live on this phone (SQLite); otherwise on the ORDINA server.
+      const raw = LOCAL_MODE ? await listLocalTasks() : (await api.get('/api/tasks')).data?.tasks;
+      const tasks = Array.isArray(raw) ? raw.map(normalizeTask) : [];
+      set({ tasks, loading: false, loadError: null, loadErrorDetail: null });
     } catch (error) {
-      set({ loading: false, loadError: friendlyError(error, 'Could not load your tasks.') });
+      set({
+        loading: false,
+        loadError: friendlyError(error, 'Could not load your tasks.'),
+        loadErrorDetail: error instanceof Error ? error.message : String(error),
+      });
     }
   },
 
   addTask: async (taskData) => {
-    const { data } = await api.post('/api/tasks', taskData);
+    const created = LOCAL_MODE
+      ? await createLocalTask(taskData as Record<string, unknown>)
+      : (await api.post('/api/tasks', taskData)).data.task;
     await get().loadTasks();
-    return normalizeTask(data.task);
+    return normalizeTask(created);
   },
 
   updateTask: async (id, updates) => {
-    await api.patch(`/api/tasks/${id}`, {
-      ...updates,
-      projectId: updates.projectId === undefined ? undefined : updates.projectId || null,
-    });
+    if (LOCAL_MODE) {
+      await updateLocalTask(id, updates as Record<string, unknown>);
+    } else {
+      await api.patch(`/api/tasks/${id}`, {
+        ...updates,
+        projectId: updates.projectId === undefined ? undefined : updates.projectId || null,
+      });
+    }
     await get().loadTasks();
   },
 
   deleteTask: async (id) => {
-    await api.delete(`/api/tasks/${id}`);
+    if (LOCAL_MODE) await deleteLocalTask(id);
+    else await api.delete(`/api/tasks/${id}`);
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
     try {
       await cancelTaskReminder(id);
@@ -138,7 +163,8 @@ export const useTasksStore = create<TasksState>((set, get) => ({
         : item)),
     }));
     try {
-      await api.patch(`/api/tasks/${id}/complete`, { completed });
+      if (LOCAL_MODE) await setLocalTaskCompleted(id, completed);
+      else await api.patch(`/api/tasks/${id}/complete`, { completed });
     } catch (error) {
       set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? task : item)) }));
       throw error;
@@ -164,7 +190,8 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     const status = task.status === 'in_progress' ? 'todo' : 'in_progress';
     set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? { ...item, status } : item)) }));
     try {
-      await api.patch(`/api/tasks/${id}`, { status });
+      if (LOCAL_MODE) await updateLocalTask(id, { status });
+      else await api.patch(`/api/tasks/${id}`, { status });
     } finally {
       await get().loadTasks();
     }

@@ -9,6 +9,7 @@ const { signToken, requireUser } = require('./lib/auth');
 const { sendMail } = require('./lib/mail');
 const { upsertOAuthUser, verifyGoogleIdToken, verifyAppleIdentityToken } = require('./lib/oauth');
 const ai = require('./lib/ai');
+const media = require('./lib/media');
 const schedule = require('./lib/schedule');
 const taskValidation = require('./lib/task-validation');
 const gemini = require('./lib/gemini');
@@ -31,7 +32,8 @@ app.use(cors({
   credentials: true,
 }));
 // Voice, photo and short video clips are sent inline as base64, so AI routes accept larger bodies.
-app.use('/api/ai', express.json({ limit: '30mb' }));
+// Up to 5 files of 10 MB, base64 encoded.
+app.use('/api/ai', express.json({ limit: '75mb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '10kb' }));
 // Method, path, status and timing only: no request bodies, so no task text or prompts in logs.
@@ -45,7 +47,7 @@ app.use(rateLimit({
 }));
 // Stricter limits where guessing or cost matters.
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { message: 'Too many attempts. Please wait a few minutes and try again.' } });
-app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete'], authLimiter);
+app.use(['/api/auth/login', '/api/auth/register', '/api/auth/forgot', '/api/auth/reset', '/account/delete', '/api/device/session'], authLimiter);
 app.use('/api/ai', rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { message: 'You are sending requests very quickly. Please wait a moment.' } }));
 
 app.get('/health', async (_req, res) => {
@@ -63,7 +65,7 @@ app.get('/api/health', async (_req, res) => {
     res.json({
       ok: true,
       service: 'ordina-backend',
-      db: 'postgresql',
+      db: 'sqlite',
       timestamp: new Date().toISOString(),
       features: {
         gemini: Boolean(process.env.GEMINI_API_KEY),
@@ -294,6 +296,37 @@ app.delete('/api/auth/account', async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     return res.status(500).json({ message: 'Unable to delete the account. Try again later.' });
+  }
+});
+
+/**
+ * Offline (development) mode: the phone keeps tasks on the device and has no email account.
+ * It identifies itself with a random device id and gets a token only for ORDINA AI, so the
+ * learned planning profile is kept per phone. Nothing else is stored for the device.
+ */
+app.post('/api/device/session', async (req, res) => {
+  const deviceId = String(req.body?.deviceId || '').trim().toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(deviceId)) {
+    return res.status(400).json({ message: 'A valid device id is required.' });
+  }
+  const email = `device-${deviceId}@device.ordina.local`;
+  try {
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      const name = String(req.body?.name || '').trim().slice(0, 80) || 'ORDINA device';
+      user = await prisma.user.create({
+        data: {
+          email,
+          displayName: name,
+          // Random, never shown: device accounts cannot sign in with a password.
+          passwordHash: await require('argon2').hash(require('node:crypto').randomBytes(32).toString('hex')),
+        },
+      });
+    }
+    return res.json({ token: signToken(user) });
+  } catch (error) {
+    console.error('Device session failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not start an ORDINA AI session.' });
   }
 });
 
@@ -655,6 +688,18 @@ async function notify(userId, title, message, type, relatedType, relatedId) {
 }
 
 /** Recent chat (last 3 hours) so ORDINA can understand answers to its own questions. */
+/**
+ * The open chat's last messages, sent by the phone (it keeps the history). Only this chat is
+ * used, never older conversations; each message is shortened.
+ */
+function clientConversation(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((item) => item && (item.role === 'user' || item.role === 'assistant') && typeof item.content === 'string')
+    .slice(-10)
+    .map((item) => ({ role: item.role, content: item.content.slice(0, 600) }));
+}
+
 async function recentConversation(userId) {
   const rows = await prisma.aiMessage.findMany({
     where: { userId, createdAt: { gte: new Date(Date.now() - 3 * 60 * 60 * 1000) } },
@@ -798,7 +843,7 @@ app.post('/api/ai/interpret', async (req, res) => {
       timezone: req.body?.timezone,
       existingTasks,
       contacts: req.body?.contacts,
-      conversation: await recentConversation(userId),
+      conversation: clientConversation(req.body?.conversation) ?? await recentConversation(userId),
     });
     await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
     await prisma.aiMessage.create({
@@ -810,34 +855,59 @@ app.post('/api/ai/interpret', async (req, res) => {
   }
 });
 
+const consumeAiFiles = media.createFileLimiter();
+
+/**
+ * Photos and files -> tasks. Files are checked by their content, read in memory and never
+ * stored; only the user's note (or a [file] label) is kept in the chat log.
+ */
 async function interpretMediaRoute(req, res) {
   const userId = requireUser(req, res);
   if (!userId) return;
-  const media = String(req.body?.media || req.body?.image || '').trim();
-  if (!media) return res.status(400).json({ message: 'An image or video is required.' });
-  const mimeType = String(req.body?.mimeType || 'image/jpeg');
-  if (!/^(image|video)\//.test(mimeType)) return res.status(400).json({ message: 'Only images and videos are supported.' });
+  const files = media.filesFromBody(req.body);
+  if (!consumeAiFiles(userId, Math.max(1, files.length))) {
+    return res.status(429).json({ code: 'RATE_LIMITED', message: 'You have sent many files in a short time. Please wait a minute and try again.' });
+  }
+  if (!gemini.isConfigured()) {
+    return res.status(503).json({ message: AI_FRIENDLY.AI_NOT_CONFIGURED, code: 'AI_NOT_CONFIGURED' });
+  }
   try {
+    const { parts, kinds } = await media.prepareFiles(files);
     await materializeRecurrence(userId);
     const existingTasks = [
       ...await ownedTasks(userId),
       ...calendarBusyTasks(req.body?.calendarEvents),
+      ...clientBusyTasks(req.body?.existingTasks),
     ];
-    const result = await ai.interpretMedia({
-      media,
-      mimeType,
-      note: req.body?.note,
-      timezone: req.body?.timezone,
-      existingTasks,
-    });
-    const label = mimeType.startsWith('video/') ? '[video]' : '[image]';
-    await prisma.aiMessage.create({ data: { userId, role: 'user', content: req.body?.note ? `${label} ${req.body.note}` : label } });
+    let result;
+    try {
+      result = await ai.interpretFiles({
+        parts,
+        kinds,
+        names: files.map((file) => file.name),
+        note: req.body?.note,
+        timezone: req.body?.timezone,
+        existingTasks,
+        conversation: clientConversation(req.body?.conversation) ?? undefined,
+      });
+    } catch (error) {
+      // Gemini refused or could not parse the file(s).
+      if (error.status && error.status < 500) {
+        return res.status(422).json({ code: 'FILE_UNREADABLE', message: 'ORDINA AI could not read that file. Try a clearer photo or another format.' });
+      }
+      throw error;
+    }
+    const label = `[${kinds.join(', ')}]`;
+    await prisma.aiMessage.create({ data: { userId, role: 'user', content: req.body?.note ? `${label} ${String(req.body.note).slice(0, 500)}` : label } });
     await prisma.aiMessage.create({
       data: { userId, role: 'assistant', content: result.message || '', actions: JSON.stringify(result) },
     });
     return res.json(result);
   } catch (error) {
-    return res.status(error.status || 500).json({ message: error.message });
+    if (error instanceof media.MediaError) return res.status(error.status).json({ code: error.code, message: error.message });
+    // Log the failure type only, never the files or the user's text.
+    console.error('AI files failed:', error.code || error.status || 'error');
+    return res.status(error.status || 500).json({ code: 'AI_ERROR', message: 'ORDINA AI could not read that just now. Please try again.' });
   }
 }
 
@@ -1001,6 +1071,24 @@ const AI_FRIENDLY = {
   AI_BAD_REQUEST: 'ORDINA AI couldn’t read that request. Try rephrasing it.',
 };
 
+/** Busy tasks sent by the phone in offline mode, reduced to what scheduling needs. */
+function clientBusyTasks(tasks) {
+  if (!Array.isArray(tasks)) return [];
+  return tasks.slice(0, 300).flatMap((task) => {
+    const dueDate = String(task?.dueDate || '');
+    const startTime = String(task?.startTime || '');
+    if (!taskValidation.isValidDateKey(dueDate) || !taskValidation.isValidTime(startTime)) return [];
+    const minutes = taskValidation.parseDurationMinutes(task?.duration ?? task?.durationMinutes);
+    return [{
+      title: String(task?.title || 'Task').slice(0, 200),
+      dueDate,
+      startTime,
+      duration: taskValidation.formatDuration(minutes && minutes >= 5 && minutes <= 1440 ? minutes : 60),
+      completed: Boolean(task?.completed),
+    }];
+  });
+}
+
 function cleanAnswers(answers) {
   return (Array.isArray(answers) ? answers : [])
     .slice(0, 5)
@@ -1035,10 +1123,13 @@ app.post('/api/ai/plan', async (req, res) => {
       await prisma.user.updateMany({ where: { id: userId, NOT: { timezone } }, data: { timezone } }).catch(() => undefined);
     }
     await materializeRecurrence(userId);
-    const [existingTasks, profile] = await Promise.all([
+    // Offline mode: the phone sends its own tasks (busy times for overlap checks, recent tasks
+    // for personalization). Gemini still only receives times and habits, never these titles.
+    const [serverTasks, profile] = await Promise.all([
       ownedTasks(userId),
-      planService.refreshProfile(prisma, userId),
+      planService.refreshProfile(prisma, userId, [], req.body?.history),
     ]);
+    const existingTasks = [...serverTasks, ...clientBusyTasks(req.body?.existingTasks)];
     const plan = await planner.createPlan({
       message,
       answers: cleanAnswers(req.body?.answers),
@@ -1048,6 +1139,7 @@ app.post('/api/ai/plan', async (req, res) => {
       clientTime: req.body?.localTime,
       existingTasks,
       profile,
+      conversation: clientConversation(req.body?.conversation) ?? undefined,
     });
     await prisma.aiMessage.create({ data: { userId, role: 'user', content: message } });
     await prisma.aiMessage.create({
@@ -1063,6 +1155,19 @@ app.post('/api/ai/plan', async (req, res) => {
       message: AI_FRIENDLY[code] || 'Something went wrong while planning. Please try again.',
       code,
     });
+  }
+});
+
+/** Offline mode: the phone saved the plan itself; learn from the user's corrections. */
+app.post('/api/ai/plan/learn', async (req, res) => {
+  const userId = requireUser(req, res);
+  if (!userId) return;
+  try {
+    return res.json(await planService.learnFromPlan(prisma, userId, { tasks: req.body?.tasks, history: req.body?.history }));
+  } catch (error) {
+    if (error.status && error.status < 500) return res.status(error.status).json({ message: error.message });
+    console.error('AI plan learn failed:', error.code || error.message);
+    return res.status(500).json({ message: 'Could not update your planning preferences.' });
   }
 });
 

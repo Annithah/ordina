@@ -12,7 +12,7 @@ export type GoogleCalendarToken = {
   clientId?: string;
   expiresAt: number;
   email: string;
-  ordinaUserId: number;
+  ordinaUserId: number | string;
 };
 
 export type CalendarBusyEvent = {
@@ -40,7 +40,7 @@ async function writeToken(value: string | null) {
   else await SecureStore.setItemAsync(TOKEN_KEY, value);
 }
 
-export async function getGoogleCalendarConnection(ordinaUserId?: number) {
+export async function getGoogleCalendarConnection(ordinaUserId?: number | string) {
   const stored = await readToken();
   if (!stored) return null;
   const token = JSON.parse(stored) as GoogleCalendarToken;
@@ -64,7 +64,7 @@ export async function saveGoogleCalendarConnection(
   expiresIn: number | undefined,
   refreshToken: string | undefined,
   clientId: string,
-  ordinaUserId: number,
+  ordinaUserId: number | string,
 ) {
   const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -99,7 +99,7 @@ export async function saveGoogleCalendarConnection(
   return token.email;
 }
 
-async function getAccessToken(ordinaUserId: number): Promise<string | null> {
+async function getAccessToken(ordinaUserId: number | string): Promise<string | null> {
   const stored = await readToken();
   if (!stored) return null;
   let token = JSON.parse(stored) as GoogleCalendarToken;
@@ -133,7 +133,7 @@ async function getAccessToken(ordinaUserId: number): Promise<string | null> {
   return token.accessToken;
 }
 
-async function calendarRequest(path: string, ordinaUserId: number, init: RequestInit = {}) {
+async function calendarRequest(path: string, ordinaUserId: number | string, init: RequestInit = {}) {
   const accessToken = await getAccessToken(ordinaUserId);
   if (!accessToken) return null;
   const response = await fetch(`https://www.googleapis.com/calendar/v3/${path}`, {
@@ -155,7 +155,7 @@ async function calendarRequest(path: string, ordinaUserId: number, init: Request
   return response.status === 204 ? null : response.json();
 }
 
-export async function getGoogleCalendarBusyEvents(ordinaUserId: number): Promise<CalendarBusyEvent[]> {
+export async function getGoogleCalendarBusyEvents(ordinaUserId: number | string): Promise<CalendarBusyEvent[]> {
   const start = new Date();
   const end = new Date(start);
   end.setDate(end.getDate() + 7);
@@ -192,7 +192,7 @@ export async function createGoogleCalendarEvents(
     contactName?: string;
     contactPhone?: string;
   }[],
-  ordinaUserId: number,
+  ordinaUserId: number | string,
 ) {
   const token = await readToken();
   if (!token) return { created: 0, skipped: true };

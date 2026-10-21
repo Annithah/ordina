@@ -9,6 +9,7 @@ import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
+import { useAuthStore } from '@/store/auth-store';
 import { MAX_ATTEMPTS, useLockStore } from '@/store/lock-store';
 
 function formatMs(ms: number) {
@@ -23,6 +24,8 @@ export default function LockScreen() {
   const { t } = useI18n();
   const lockUntil = useLockStore((s) => s.lockUntil);
   const { verifyPin, attempts } = useLockStore();
+  const user = useAuthStore((s) => s.user);
+  const signOut = useAuthStore((s) => s.signOut);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [now, setNow] = useState(Date.now());
@@ -70,7 +73,9 @@ export default function LockScreen() {
         </View>
       ) : (
         <>
-          <ThemedText style={styles.title}>{t('lock.title')}</ThemedText>
+          <ThemedText style={styles.title}>
+            {user?.name ? t('lock.greeting', { name: user.name.split(' ')[0] }) : t('lock.title')}
+          </ThemedText>
           <ThemedText themeColor="textSecondary" style={styles.body}>
             {t('lock.subtitle')}
           </ThemedText>
@@ -109,6 +114,13 @@ export default function LockScreen() {
             ))}
           </View>
           <PrimaryButton label={t('lock.unlock')} disabled={pin.length !== 4} onPress={() => void submit(pin)} />
+          <Pressable
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => void signOut().then(() => router.replace(href('/sign-in')))}
+            style={styles.notYou}>
+            <ThemedText themeColor="textSecondary" style={styles.notYouText}>{t('lock.notYou')}</ThemedText>
+          </Pressable>
         </>
       )}
     </SafeAreaView>
@@ -132,4 +144,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   keyText: { fontSize: 22, fontFamily: 'Poppins_600SemiBold' },
+  notYou: { alignSelf: 'center', paddingVertical: 8 },
+  notYouText: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
 });
