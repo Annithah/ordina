@@ -59,12 +59,15 @@ test('durations are normalised and bounded', () => {
   assert.ok(validateTaskInput({ title: 'a', duration: '25h' }).errors.duration);
 });
 
-test('priority, status and category are restricted to known values', () => {
+test('priority, status and category are restricted to valid values', () => {
   assert.equal(validateTaskInput({ title: 'a', priority: 3 }).value.priority, 'high');
   assert.equal(validateTaskInput({ title: 'a', priority: 'Medium' }).value.priority, 'medium');
   assert.ok(validateTaskInput({ title: 'a', priority: 'urgent' }).errors.priority);
   assert.equal(validateTaskInput({ title: 'a', status: 'todo' }).value.status, 'pending');
   assert.ok(validateTaskInput({ title: 'a', status: 'done' }).errors.status);
   assert.equal(validateTaskInput({ title: 'a', category: 'Health' }).value.category, 'health');
-  assert.ok(validateTaskInput({ title: 'a', category: 'sports' }).errors.category);
+  // Users create their own categories on the phone: any short lowercase id is accepted.
+  assert.equal(validateTaskInput({ title: 'a', category: 'exams' }).value.category, 'exams');
+  assert.equal(validateTaskInput({ title: 'a', category: '3f2a-9c1d' }).value.category, '3f2a-9c1d');
+  assert.ok(validateTaskInput({ title: 'a', category: 'not a category!' }).errors.category);
 });

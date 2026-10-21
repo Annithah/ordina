@@ -9,6 +9,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { OrdinaMark } from '@/components/ordina-mark';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
+import { asIcon, useCategoryName } from '@/components/category-ui';
 import { categoryInfo } from '@/features/categories';
 import { categoryCounts, filterByCategory, groupByCategory, searchTasks } from '@/features/task-filter';
 import { useTheme } from '@/hooks/use-theme';
@@ -96,6 +97,7 @@ export default function HomeScreen() {
   });
   const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [query, setQuery] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<string | null>(null);
   // Tapping a Dashboard number shows only those tasks.
   const [statusFilter, setStatusFilter] = useState<DashboardStatus | null>(null);
@@ -183,7 +185,7 @@ export default function HomeScreen() {
   const upcomingTasks = tasks.filter((t) => t.dueDate === tomorrow && !t.completed).slice(0, 2);
 
   // Search looks through every task; otherwise the list shows the selected day. Chips filter both.
-  const categoryLabel = (id: string) => t(`categories.items.${id}`);
+  const categoryLabel = useCategoryName();
   const searching = query.trim().length > 0;
   const chips = useMemo(() => categoryCounts(tasks), [tasks]);
   const activeFilter = filter && chips.some((chip) => chip.id === filter) ? filter : null;
@@ -273,7 +275,7 @@ export default function HomeScreen() {
                   accessibilityState={{ selected: active }}
                   onPress={() => setFilter(chip.id)}
                   style={[styles.filterChip, { borderColor: active ? tint : theme.border, backgroundColor: active ? `${tint}1F` : theme.card }]}>
-                  {info ? <Ionicons name={info.icon} size={13} color={tint} /> : null}
+                  {info ? <Ionicons name={asIcon(info.icon)} size={13} color={tint} /> : null}
                   <ThemedText style={[styles.filterText, { color: active ? tint : theme.text }]}>
                     {chip.id ? categoryLabel(chip.id) : t('home.all')}
                   </ThemedText>
@@ -526,16 +528,29 @@ export default function HomeScreen() {
         ) : (
           groups.map((group) => {
             const info = categoryInfo(group.category);
+            const isCollapsed = collapsedGroups.has(group.category);
             return (
               <View key={group.category} style={styles.group}>
-                <View style={styles.groupHead}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ expanded: !isCollapsed }}
+                  onPress={() => setCollapsedGroups((current) => {
+                    const next = new Set(current);
+                    if (next.has(group.category)) next.delete(group.category);
+                    else next.add(group.category);
+                    return next;
+                  })}
+                  style={styles.groupHead}>
                   <View style={[styles.groupIcon, { backgroundColor: `${info.color}1F` }]}>
-                    <Ionicons name={info.icon} size={14} color={info.color} />
+                    <Ionicons name={asIcon(info.icon)} size={14} color={info.color} />
                   </View>
                   <ThemedText style={styles.groupTitle}>{categoryLabel(group.category)}</ThemedText>
-                  <ThemedText themeColor="textSecondary" style={styles.groupCount}>{group.tasks.length}</ThemedText>
-                </View>
-                {group.tasks.map((task) => {
+                  <ThemedText themeColor="textSecondary" style={styles.groupCount}>
+                    {t('tasksTab.pendingDone', { pending: group.pending, done: group.done })}
+                  </ThemedText>
+                  <Ionicons name={isCollapsed ? 'chevron-down' : 'chevron-up'} size={16} color={theme.textSecondary} />
+                </Pressable>
+                {isCollapsed ? null : group.tasks.map((task) => {
                   const status = dashboardStatus(task);
                   return (
                   <View key={task.id} style={[styles.row, { backgroundColor: theme.card }]}>

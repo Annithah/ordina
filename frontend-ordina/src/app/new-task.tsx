@@ -23,12 +23,15 @@ import { PlanReview } from '@/components/plan-review';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { CATEGORY_GROUPS, categoryInfo, focusGroups, splitCategories, type CategoryInfo } from '@/features/categories';
+import { CategoryBadge, CategoryPicker, asIcon } from '@/components/category-ui';
+import { knownCategory } from '@/features/categories';
+import { pickerOrder } from '@/features/category-tree';
 import { bestTime, defaultCategory, defaultReminderLead } from '@/features/starting-point';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { cancelTaskReminder, scheduleTaskReminder } from '@/services/notifications';
 import { useAuthStore } from '@/store/auth-store';
+import { nameOf, useCategoriesStore } from '@/store/categories-store';
 import { usePreferencesStore } from '@/store/preferences-store';
 import { useTasksStore, type Category, type Priority, type Task } from '@/store/tasks-store';
 import { addLocalDays, localDateKey } from '@/utils/dates';
@@ -195,9 +198,10 @@ function CustomDuration({ visible, minutes, onSave, onCancel }: {
 export default function NewTaskScreen() {
   const theme = useTheme();
   const { t } = useI18n();
-  const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; date?: string; time?: string; category?: string }>();
   const presetDate = typeof params.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : undefined;
   const presetTime = typeof params.time === 'string' && /^\d{2}:\d{2}$/.test(params.time) ? params.time : undefined;
+  const presetCategory = knownCategory(params.category) ?? undefined;
   const taskId = Array.isArray(params.id) ? params.id[0] : params.id;
   const tasks = useTasksStore((s) => s.tasks);
   const loadTasks = useTasksStore((s) => s.loadTasks);
@@ -233,10 +237,10 @@ export default function NewTaskScreen() {
       </SafeAreaView>
     );
   }
-  return <TaskForm key={taskToEdit?.id ?? 'new'} taskToEdit={taskToEdit} presetDate={presetDate} presetTime={presetTime} />;
+  return <TaskForm key={taskToEdit?.id ?? 'new'} taskToEdit={taskToEdit} presetDate={presetDate} presetTime={presetTime} presetCategory={presetCategory} />;
 }
 
-function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; presetDate?: string; presetTime?: string }) {
+function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { taskToEdit?: Task; presetDate?: string; presetTime?: string; presetCategory?: string }) {
   const theme = useTheme();
   const { t, locale } = useI18n();
   const answers = usePreferencesStore((s) => s.answers);
@@ -248,8 +252,13 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const [notes, setNotes] = useState(taskToEdit?.description ?? '');
   const [priority, setPriority] = useState<Priority>(taskToEdit?.priority ?? 'medium');
   // A new task starts from the intro answers: the user's own area, their reminder choice.
-  const [category, setCategory] = useState<Category>(taskToEdit?.category ?? defaultCategory(answers));
-  const [showAllCategories, setShowAllCategories] = useState(false);
+  const [category, setCategoryState] = useState<Category>(taskToEdit?.category ?? presetCategory ?? defaultCategory(answers));
+  const categoryTouched = useRef(Boolean(taskToEdit || presetCategory));
+  const [categoryPicker, setCategoryPicker] = useState(false);
+  const categories = useCategoriesStore((s) => s.categories);
+  const recentCategories = useCategoriesStore((s) => s.recent);
+  const suggest = useCategoriesStore((s) => s.suggest);
+  const learn = useCategoriesStore((s) => s.learn);
   const [customOpen, setCustomOpen] = useState(false);
   const [dueDate, setDueDate] = useState(taskToEdit?.dueDate ?? presetDate ?? localDateKey());
   const [startTime, setStartTime] = useState(taskToEdit?.startTime ?? presetTime ?? '');
@@ -308,11 +317,19 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
   const presetTimes = [...timeOptions.map((item) => item.value), ...(showFavourite ? [favouriteTime!] : [])];
   const customDuration = !DURATIONS.includes(minutes);
 
-  const { mine, others } = splitCategories(focusGroups(answers));
-  // The task's own category always shows, even when it is outside the user's areas.
-  const myCategories: CategoryInfo[] = mine.some((item) => item.id === category) || showAllCategories
-    ? mine
-    : [categoryInfo(category), ...mine];
+  // A new task's category follows its title ("Pay rent" -> Bills) until the user picks one.
+  const suggestion = useMemo(() => (isEditMode ? null : suggest(title)), [isEditMode, suggest, title, categories]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!categoryTouched.current) setCategoryState(suggestion ?? presetCategory ?? defaultCategory(answers));
+  }, [suggestion, presetCategory, answers]);
+
+  function setCategory(id: string) {
+    categoryTouched.current = true;
+    setCategoryState(id);
+  }
+
+  const { pinned, recent } = pickerOrder(categories, recentCategories);
+  const quickCategories = [...pinned, ...recent].filter((record, index, list) => list.findIndex((item) => item.id === record.id) === index).slice(0, 6);
 
   /** Today / Tomorrow, or the date in the app language. */
   function dayLabel(key: string) {
@@ -437,6 +454,8 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     } as Omit<Task, 'id' | 'createdAt' | 'updatedAt'>;
 
     setSaving(true);
+    // The user changed ORDINA's suggestion: remember it for next time.
+    if (!isEditMode && suggestion && category !== suggestion) void learn(taskTitle, suggestion, category);
     let savedTaskId = taskToEdit?.id;
     try {
       if (taskToEdit) await updateTask(taskToEdit.id, payload);
@@ -480,6 +499,9 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
     savingPreviewRef.current = true;
     setSavingPreview(true);
     const payload = toConfirmPayload(preview.drafts);
+    for (const draft of preview.drafts) {
+      if (draft.suggestedCategory && draft.category !== draft.suggestedCategory) void learn(draft.title, draft.suggestedCategory, draft.category);
+    }
     try {
       if (LOCAL_MODE) await confirmLocalPlan(preview.planId, payload);
       else await confirmPlan(preview.planId, payload);
@@ -752,46 +774,42 @@ function TaskForm({ taskToEdit, presetDate, presetTime }: { taskToEdit?: Task; p
           </Section>
 
           <Section icon="pricetag-outline" title={t('task.category')}>
-            {others.length ? <ThemedText themeColor="textSecondary" style={styles.helper}>{t('categories.mine')}</ThemedText> : null}
-            <View style={styles.wrap}>
-              {myCategories.map((item) => (
-                <Chip
-                  key={item.id}
-                  label={t(`categories.items.${item.id}`)}
-                  icon={item.icon}
-                  color={item.color}
-                  active={category === item.id}
-                  onPress={() => setCategory(item.id)}
-                />
-              ))}
-            </View>
-            {showAllCategories
-              ? CATEGORY_GROUPS.filter((group) => others.some((item) => item.group === group.id)).map((group) => (
-                <View key={group.id} style={styles.categoryGroup}>
-                  <ThemedText themeColor="textSecondary" style={styles.helper}>{t(`categories.groups.${group.id}`)}</ThemedText>
-                  <View style={styles.wrap}>
-                    {others.filter((item) => item.group === group.id).map((item) => (
-                      <Chip
-                        key={item.id}
-                        label={t(`categories.items.${item.id}`)}
-                        icon={item.icon}
-                        color={item.color}
-                        active={category === item.id}
-                        onPress={() => setCategory(item.id)}
-                      />
-                    ))}
-                  </View>
+            <View style={styles.categoryRow}>
+              <CategoryBadge id={category} onPress={() => setCategoryPicker(true)} />
+              {!isEditMode && suggestion && suggestion === category ? (
+                <View style={styles.suggestedTag}>
+                  <Ionicons name="sparkles" size={12} color={theme.primary} />
+                  <ThemedText style={[styles.helper, { color: theme.primary }]}>{t('categories.autoPicked')}</ThemedText>
                 </View>
-              ))
-              : null}
-            {others.length ? (
-              <Pressable accessibilityRole="button" onPress={() => setShowAllCategories((value) => !value)} style={styles.moreCategories}>
-                <ThemedText style={[styles.slotText, { color: theme.primary }]}>
-                  {showAllCategories ? t('categories.showLess') : t('categories.showAll')}
-                </ThemedText>
-                <Ionicons name={showAllCategories ? 'chevron-up' : 'chevron-down'} size={14} color={theme.primary} />
-              </Pressable>
+              ) : null}
+            </View>
+            {quickCategories.length ? (
+              <View style={styles.wrap}>
+                {quickCategories.filter((item) => item.id !== category).map((item) => (
+                  <Chip
+                    key={item.id}
+                    label={nameOf(item)}
+                    icon={asIcon(item.icon)}
+                    color={item.color}
+                    active={false}
+                    onPress={() => setCategory(item.id)}
+                  />
+                ))}
+              </View>
             ) : null}
+            <Pressable accessibilityRole="button" onPress={() => setCategoryPicker(true)} style={styles.moreCategories}>
+              <ThemedText style={[styles.slotText, { color: theme.primary }]}>{t('categories.allCategories')}</ThemedText>
+              <Ionicons name="chevron-forward" size={14} color={theme.primary} />
+            </Pressable>
+            <CategoryPicker
+              visible={categoryPicker}
+              value={category}
+              onSelect={(id) => {
+                setCategory(id);
+                setCategoryPicker(false);
+              }}
+              onClose={() => setCategoryPicker(false)}
+            />
           </Section>
 
           {FEATURES.taskReminders ? <Section icon="notifications-outline" title={t('task.reminder')}>
@@ -951,7 +969,8 @@ const styles = StyleSheet.create({
   segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 10, paddingVertical: 9, borderWidth: 1, borderColor: 'transparent' },
   segmentText: { fontSize: 13, fontFamily: 'Poppins_500Medium' },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  categoryGroup: { gap: 6 },
+  categoryRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  suggestedTag: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   moreCategories: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, minHeight: 36 },
   stepperRow: { flexDirection: 'row', gap: 12 },
   stepper: { flex: 1, borderWidth: 1, borderRadius: 14, padding: 10, alignItems: 'center', gap: 6 },

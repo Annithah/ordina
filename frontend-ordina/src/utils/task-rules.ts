@@ -3,6 +3,7 @@
  * server: backend-ordina/src/lib/task-validation.js. Keep the two files in step.
  */
 import { knownCategory } from '@/features/categories';
+import { isCategoryId } from '@/features/category-tree';
 import { isValidDateKey, isValidTime } from '@/utils/task-validation';
 
 export const TITLE_MAX = 200;
@@ -118,8 +119,9 @@ export function validateTaskInput(body: Record<string, unknown>, { partial = fal
   if (has('completed')) value.completed = Boolean(input.completed);
 
   if (has('category')) {
-    // Version 1 ids (design, database) are still accepted and renamed.
-    const category = input.category ? knownCategory(input.category) : null;
+    // Old ids (design, homework...) are renamed; the user's own categories have generated ids.
+    const raw = String(input.category ?? '').trim().toLowerCase();
+    const category = raw ? knownCategory(raw) ?? (isCategoryId(raw) ? raw : null) : null;
     if (input.category && !category) errors.category = 'Unknown category.';
     else value.category = category;
   }

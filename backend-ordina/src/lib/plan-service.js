@@ -102,7 +102,9 @@ function validatePlanTasks(tasks) {
       throw httpError(400, `Task ${index + 1}: ${firstError(errors)}`, { errors: { index, ...errors } });
     }
     const type = classifyTaskType(value.title, value.description, task?.type);
-    return { input: task, value, type };
+    // The category the user saw (and maybe changed) in the preview.
+    const category = typeof task?.category === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(task.category) ? task.category : null;
+    return { input: task, value, type, category };
   });
 }
 
@@ -128,7 +130,7 @@ async function confirmPlan(prisma, userId, { idempotencyKey, tasks }, { taskPayl
 
   const createdIds = [];
   try {
-    for (const { value, type } of items) {
+    for (const { value, type, category } of items) {
       const row = await prisma.task.create({
         data: taskPayload({
           title: value.title,
@@ -141,7 +143,7 @@ async function confirmPlan(prisma, userId, { idempotencyKey, tasks }, { taskPayl
         }, userId),
       });
       createdIds.push(row.id);
-      await setTaskCategory(userId, row.id, TYPE_CATEGORY[type] || 'personal');
+      await setTaskCategory(userId, row.id, category || TYPE_CATEGORY[type] || 'other');
       await setTaskDeadline(row.id, value.deadline ?? undefined);
     }
     const created = await prisma.task.findMany({ where: { id: { in: createdIds } }, include, orderBy: { id: 'asc' } });

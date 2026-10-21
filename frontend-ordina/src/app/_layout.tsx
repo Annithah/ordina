@@ -8,6 +8,7 @@ import {
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { ToastHost } from '@/components/toast';
@@ -17,6 +18,7 @@ import { I18nProvider } from '@/providers/i18n-provider';
 import { loadServerOverride } from '@/services/api';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
+import { useCategoriesStore } from '@/store/categories-store';
 import { useLockStore } from '@/store/lock-store';
 import { usePreferencesStore } from '@/store/preferences-store';
 import { FEATURES } from '@/config/release';
@@ -41,6 +43,8 @@ function RootStack() {
         <Stack.Screen name="lock" />
         <Stack.Screen name="language" />
         <Stack.Screen name="categories" />
+        <Stack.Screen name="category/[id]" />
+        <Stack.Screen name="ai-history" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="ai" options={{ animation: 'slide_from_bottom' }} />
@@ -80,6 +84,7 @@ export default function RootLayout() {
     void hydrateLock();
     void loadPreferences();
     void loadServerOverride();
+    void useCategoriesStore.getState().load();
   }, [hydrate, hydrateLock, loadPreferences]);
 
   // If the fonts can't load, continue with the system font instead of a blank screen.
@@ -88,12 +93,14 @@ export default function RootLayout() {
   }
 
   return (
-    <KeyboardProvider>
-      <ThemeProvider>
-        <I18nProvider>
-          <RootStack />
-        </I18nProvider>
-      </ThemeProvider>
-    </KeyboardProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <RootStack />
+          </I18nProvider>
+        </ThemeProvider>
+      </KeyboardProvider>
+    </GestureHandlerRootView>
   );
 }

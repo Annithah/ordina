@@ -1,113 +1,98 @@
 /**
- * Task categories, grouped the way people think about their lives.
- * Labels are translated (categories.items.<id> / categories.groups.<id>); ids are stored on tasks.
+ * The categories the app is using right now. The categories store (SQLite) keeps this registry
+ * up to date, so code outside React (filters, validation, ORDINA AI) can look categories up.
+ * Before the database has loaded, the default categories are used.
  */
-import type Ionicons from '@expo/vector-icons/Ionicons';
+import {
+  OTHER_ID,
+  LEGACY_CATEGORY_MAP,
+  defaultRecords,
+  isCategoryId,
+  rootOf,
+  type CategoryRecord,
+} from './category-tree.ts';
 
-type IconName = keyof typeof Ionicons.glyphMap;
+export { OTHER_ID } from './category-tree.ts';
 
-export type CategoryGroupId = 'work' | 'education' | 'health' | 'home' | 'finance' | 'business' | 'social' | 'creative';
+export type CategoryInfo = {
+  id: string;
+  /** User's own name; empty means the translated default name (categories.defaults.<id>). */
+  name: string;
+  color: string;
+  icon: string;
+  parentId: string | null;
+  isDefault: boolean;
+  isArchived: boolean;
+};
 
-export type CategoryInfo = { id: string; group: CategoryGroupId; icon: IconName; color: string };
+let registry: CategoryRecord[] = defaultRecords('');
+let byId = new Map(registry.map((record) => [record.id, record]));
 
-export const CATEGORY_GROUPS: { id: CategoryGroupId; icon: IconName; color: string }[] = [
-  { id: 'work', icon: 'briefcase-outline', color: '#5C4DF2' },
-  { id: 'education', icon: 'school-outline', color: '#3B82F6' },
-  { id: 'health', icon: 'fitness-outline', color: '#22C55E' },
-  { id: 'home', icon: 'home-outline', color: '#F59E0B' },
-  { id: 'finance', icon: 'wallet-outline', color: '#0EA5A4' },
-  { id: 'business', icon: 'rocket-outline', color: '#8B5CF6' },
-  { id: 'social', icon: 'people-outline', color: '#F43F5E' },
-  { id: 'creative', icon: 'color-palette-outline', color: '#EC4899' },
-];
-
-const GROUP_COLOR = Object.fromEntries(CATEGORY_GROUPS.map((group) => [group.id, group.color])) as Record<CategoryGroupId, string>;
-
-const item = (id: string, group: CategoryGroupId, icon: IconName): CategoryInfo => ({ id, group, icon, color: GROUP_COLOR[group] });
-
-export const CATEGORIES: CategoryInfo[] = [
-  item('work', 'work', 'briefcase-outline'),
-  item('meetings', 'work', 'people-circle-outline'),
-  item('projects', 'work', 'folder-open-outline'),
-  item('admin', 'work', 'mail-outline'),
-  item('career', 'work', 'trending-up-outline'),
-  item('study', 'education', 'school-outline'),
-  item('homework', 'education', 'create-outline'),
-  item('exams', 'education', 'document-text-outline'),
-  item('reading', 'education', 'book-outline'),
-  item('learning', 'education', 'laptop-outline'),
-  item('research', 'education', 'search-outline'),
-  item('fitness', 'health', 'barbell-outline'),
-  item('health', 'health', 'medkit-outline'),
-  item('nutrition', 'health', 'nutrition-outline'),
-  item('mindfulness', 'health', 'leaf-outline'),
-  item('personal', 'home', 'person-outline'),
-  item('family', 'home', 'heart-outline'),
-  item('kids', 'home', 'happy-outline'),
-  item('chores', 'home', 'home-outline'),
-  item('errands', 'home', 'cart-outline'),
-  item('bills', 'finance', 'receipt-outline'),
-  item('budget', 'finance', 'wallet-outline'),
-  item('business', 'business', 'rocket-outline'),
-  item('sales', 'business', 'cash-outline'),
-  item('marketing', 'business', 'megaphone-outline'),
-  item('friends', 'social', 'chatbubbles-outline'),
-  item('events', 'social', 'gift-outline'),
-  item('faith', 'social', 'sparkles-outline'),
-  item('volunteering', 'social', 'hand-left-outline'),
-  item('creative', 'creative', 'color-palette-outline'),
-  item('hobbies', 'creative', 'game-controller-outline'),
-  item('travel', 'creative', 'airplane-outline'),
-];
-
-export const CATEGORY_IDS = new Set(CATEGORIES.map((category) => category.id));
-
-/** Ids used by version 1 of the app, still found on older tasks. */
-const LEGACY: Record<string, string> = { design: 'creative', database: 'errands' };
-
-export const DEFAULT_CATEGORY = 'personal';
-
-/** A known category id (old version 1 ids are renamed), or null when the value is not a category. */
-export function knownCategory(value: unknown): string | null {
-  const id = String(value ?? '').trim().toLowerCase();
-  const mapped = LEGACY[id] ?? id;
-  return CATEGORY_IDS.has(mapped) ? mapped : null;
+export function setCategoryRegistry(records: CategoryRecord[]) {
+  registry = records;
+  byId = new Map(records.map((record) => [record.id, record]));
 }
 
-/** Any stored value -> a category id; unknown or empty values become Personal. */
+export function categoryRegistry() {
+  return registry;
+}
+
+export const DEFAULT_CATEGORY = OTHER_ID;
+
+/** An existing (not deleted) category id for any value, old ids renamed; null when there is none. */
+export function knownCategory(value: unknown): string | null {
+  const id = String(value ?? '').trim().toLowerCase();
+  if (!id) return null;
+  const live = (candidate: string) => {
+    const record = byId.get(candidate);
+    return record && !record.deletedAt ? candidate : null;
+  };
+  return live(id) ?? (LEGACY_CATEGORY_MAP[id] ? live(LEGACY_CATEGORY_MAP[id]) : null);
+}
+
+/**
+ * The category id stored on a task. Ids that look valid are kept even when not (yet) in the
+ * registry, so a user's own category never turns into Other while the database is loading.
+ */
 export function normalizeCategory(value: unknown): string {
-  return knownCategory(value) ?? DEFAULT_CATEGORY;
+  const known = knownCategory(value);
+  if (known) return known;
+  const id = String(value ?? '').trim().toLowerCase();
+  return isCategoryId(id) && !LEGACY_CATEGORY_MAP[id] ? id : OTHER_ID;
 }
 
 export function categoryInfo(id: unknown): CategoryInfo {
-  const normalized = normalizeCategory(id);
-  return CATEGORIES.find((category) => category.id === normalized)!;
+  const record = byId.get(normalizeCategory(id)) ?? byId.get(OTHER_ID) ?? defaultRecords('').find((item) => item.id === OTHER_ID)!;
+  return {
+    id: record.id,
+    name: record.name,
+    color: record.color,
+    icon: record.icon,
+    parentId: record.parentId,
+    isDefault: record.isDefault,
+    isArchived: record.isArchived,
+  };
 }
 
-/** Onboarding "What would you like help with?" answer -> the category group it stands for. */
-const FOCUS_TO_GROUP: Record<string, CategoryGroupId> = {
-  work: 'work',
-  study: 'education',
-  health: 'health',
-  family: 'home',
-  business: 'business',
-  finance: 'finance',
-  social: 'social',
-  creative: 'creative',
+/** The top-level category of a task's category (Exams -> Study). */
+export function rootCategory(id: unknown): string {
+  return rootOf(normalizeCategory(id), registry);
+}
+
+/** Onboarding "What would you like help with?" answers -> the default categories they stand for. */
+const FOCUS_TO_CATEGORIES: Record<string, string[]> = {
+  work: ['work'],
+  study: ['study'],
+  health: ['health'],
+  family: ['family'],
+  business: ['work'],
+  finance: ['finance'],
+  social: ['family', 'spiritual'],
+  creative: ['personal'],
 };
 
-/** The groups the user said they plan for, in catalogue order. Empty answers mean "all". */
-export function focusGroups(answers: Record<string, string[] | undefined>): CategoryGroupId[] {
-  const chosen = new Set((answers.focus ?? []).map((focus) => FOCUS_TO_GROUP[focus]).filter(Boolean));
-  return CATEGORY_GROUPS.map((group) => group.id).filter((id) => chosen.size === 0 || chosen.has(id));
-}
-
-/** The user's own categories first (from their focus areas), then all the others. */
-export function splitCategories(groups: CategoryGroupId[]) {
-  const mine = new Set(groups);
-  const allGroups = mine.size === CATEGORY_GROUPS.length;
-  return {
-    mine: allGroups ? CATEGORIES : CATEGORIES.filter((category) => mine.has(category.group)),
-    others: allGroups ? [] : CATEGORIES.filter((category) => !mine.has(category.group)),
-  };
+/** The categories the user said they plan for, in catalogue order (empty when they skipped). */
+export function focusCategories(answers: Record<string, string[] | undefined>): string[] {
+  const chosen = new Set((answers.focus ?? []).flatMap((focus) => FOCUS_TO_CATEGORIES[focus] ?? []));
+  return defaultRecords('').filter((record) => !record.parentId && chosen.has(record.id)).map((record) => record.id);
 }
