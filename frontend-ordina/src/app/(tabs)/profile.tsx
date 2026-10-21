@@ -6,11 +6,13 @@ import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState, type ReactNode } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { RETENTION_OPTIONS, type Retention } from '@/features/chat-groups';
+import { deleteAllConversations, getRetention, setRetention } from '@/services/chat-history';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { FEATURES } from '@/config/release';
@@ -141,11 +143,15 @@ export default function SettingsScreen() {
   const loadTasks = useTasksStore((s) => s.loadTasks);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
-  const [confirm, setConfirm] = useState<null | 'signOut' | 'deleteTasks'>(null);
+  const [confirm, setConfirm] = useState<null | 'signOut' | 'deleteTasks' | 'deleteChats'>(null);
+  const [retention, setRetentionState] = useState<Retention>('forever');
+  const [retentionOpen, setRetentionOpen] = useState(false);
+  const retentionLabel = (value: Retention) => t(value === 'forever' ? 'chats.keepForever' : value === '30' ? 'chats.keep30' : 'chats.keep90');
   const [busy, setBusy] = useState(false);
   // Read straight from the phone's database, so it shows what is really saved.
   const [savedCount, setSavedCount] = useState<number | null>(null);
   useFocusEffect(useCallback(() => {
+    void getRetention().then(setRetentionState);
     void countLocalTasks().then(setSavedCount).catch(() => setSavedCount(null));
   }, []));
 
@@ -168,6 +174,11 @@ export default function SettingsScreen() {
         await signOut();
         setConfirm(null);
         router.replace(href('/sign-in'));
+        return;
+      }
+      if (confirm === 'deleteChats') {
+        await deleteAllConversations();
+        toast.success(t('chats.deletedAll'));
         return;
       }
       await deleteAllLocalData();
@@ -283,6 +294,11 @@ export default function SettingsScreen() {
             <Row icon="refresh-outline" label={t('profile.replayIntro')} last onPress={() => router.push(href('/onboarding'))} />
           </Section>
 
+          <Section title={t('chats.history')}>
+            <Row icon="time-outline" label={t('chats.keepHistory')} value={retentionLabel(retention)} onPress={() => setRetentionOpen(true)} />
+            <Row icon="chatbubbles-outline" label={t('chats.deleteAll')} danger last onPress={() => setConfirm('deleteChats')} />
+          </Section>
+
           <Section title={t('profile.sectionData')}>
             {PRIVACY_URL ? (
               <Row icon="shield-checkmark-outline" label={t('profile.privacy')} onPress={() => void Linking.openURL(PRIVACY_URL)} />
@@ -298,19 +314,48 @@ export default function SettingsScreen() {
 
       <ConfirmDialog
         visible={confirm !== null}
-        title={confirm === 'signOut' ? t('profile.signOutTitle') : t('profile.deleteTasksTitle')}
-        message={confirm === 'signOut' ? t('profile.signOutBody') : t('profile.deleteTasksBody')}
+        title={confirm === 'signOut' ? t('profile.signOutTitle') : confirm === 'deleteChats' ? t('chats.deleteAllTitle') : t('profile.deleteTasksTitle')}
+        message={confirm === 'signOut' ? t('profile.signOutBody') : confirm === 'deleteChats' ? t('chats.deleteAllBody') : t('profile.deleteTasksBody')}
         confirmLabel={confirm === 'signOut' ? t('profile.signOut') : t('common.delete')}
         destructive
         busy={busy}
         onConfirm={() => void runConfirm()}
         onCancel={() => setConfirm(null)}
       />
+
+      <Modal visible={retentionOpen} transparent animationType="fade" onRequestClose={() => setRetentionOpen(false)}>
+        <Pressable style={styles.retentionBackdrop} onPress={() => setRetentionOpen(false)}>
+          <Pressable style={[styles.retentionCard, { backgroundColor: theme.card }]}>
+            <ThemedText style={styles.retentionTitle}>{t('chats.keepHistory')}</ThemedText>
+            <ThemedText themeColor="textSecondary" style={styles.retentionHint}>{t('chats.keepHint')}</ThemedText>
+            {RETENTION_OPTIONS.map((option) => (
+              <Pressable
+                key={option}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: retention === option }}
+                onPress={() => {
+                  setRetentionOpen(false);
+                  setRetentionState(option);
+                  void setRetention(option).catch(() => toast.error(t('chats.failed')));
+                }}
+                style={styles.retentionOption}>
+                <Ionicons name={retention === option ? 'radio-button-on' : 'radio-button-off'} size={22} color={theme.primary} />
+                <ThemedText>{retentionLabel(option)}</ThemedText>
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  retentionBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'center', padding: 24 },
+  retentionCard: { borderRadius: 20, padding: 18, gap: 6 },
+  retentionTitle: { fontSize: 17, fontFamily: 'Poppins_600SemiBold' },
+  retentionHint: { fontSize: 13, lineHeight: 18, marginBottom: 6 },
+  retentionOption: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 48 },
   safe: { flex: 1 },
   topBar: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   screenTitle: { fontSize: 24, fontFamily: 'Poppins_700Bold' },

@@ -27,6 +27,7 @@ const PRIORITY_RANK = { high: 0, medium: 1, low: 2 };
 
 const SYSTEM_PROMPT = `You are ORDINA, a calm, practical daily planner.
 Turn the user's request into a task plan. Return JSON that matches the response schema exactly.
+"earlierInThisChat" (when present) holds the earlier messages of this conversation: use it to understand references such as "it", "the same time" or "also add". Plan only what the latest request asks for.
 
 Dates and times
 - "today" is given in the context, with the user's local time and timezone. Resolve "tomorrow", weekdays, "tonight" etc. from it.
@@ -111,13 +112,15 @@ function busyBlocks(existingTasks, fromDate) {
     });
 }
 
-function buildPrompt({ message, answers, keepTasks, clock, busy, profile }) {
+function buildPrompt({ message, answers, keepTasks, clock, busy, profile, conversation }) {
   const context = {
     today: clock.today,
     weekday: clock.weekday,
     localTime: timeFromMinutes(clock.minutes),
     timezone: clock.timezone,
     request: message,
+    // Earlier messages of this chat only, so "move it to Friday" knows what "it" is.
+    earlierInThisChat: conversation?.length ? conversation : undefined,
     clarifications: answers?.length ? answers : undefined,
     keepTasks: keepTasks?.length
       ? keepTasks.map((task) => ({ title: task.title, date: task.date, startTime: task.startTime, durationMinutes: task.durationMinutes }))
@@ -310,12 +313,12 @@ function sanitizeKeepTasks(keepTasks, today) {
 /**
  * @returns {Promise<{ planId, summary, tasks, questions, assumptions, today }>}
  */
-async function createPlan({ message, answers, keepTasks, timezone, clientToday, clientTime, existingTasks, profile, generate = geminiJson }) {
+async function createPlan({ message, answers, keepTasks, timezone, clientToday, clientTime, existingTasks, profile, conversation, generate = geminiJson }) {
   const clock = resolveNow({ timezone, clientToday, clientTime });
   const busy = busyBlocks(existingTasks, clock.today);
   const kept = sanitizeKeepTasks(keepTasks, clock.today);
   const raw = await generate(
-    [{ role: 'user', parts: [{ text: buildPrompt({ message, answers, keepTasks: kept, clock, busy, profile }) }] }],
+    [{ role: 'user', parts: [{ text: buildPrompt({ message, answers, keepTasks: kept, clock, busy, profile, conversation }) }] }],
     { responseSchema: PLAN_RESPONSE_SCHEMA, deadlineMs: PLAN_DEADLINE_MS },
   );
   const plan = validatePlan(raw, { today: clock.today });
