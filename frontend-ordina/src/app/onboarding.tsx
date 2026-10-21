@@ -11,6 +11,7 @@ import { PrimaryButton } from '@/components/primary-button';
 import { SocialAuthButtons } from '@/components/social-auth-buttons';
 import { ThemedText } from '@/components/themed-text';
 import { focusCategories } from '@/features/categories';
+import { askForNotifications } from '@/services/notifications';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
@@ -129,6 +130,8 @@ export default function OnboardingScreen() {
     if (!finished) return;
     void saveAnswers(answers);
     void completeOnboarding();
+    // The intro is done: a good moment to offer reminders (unless the user said no reminders).
+    if (answers.reminders?.[0] !== 'none') void askForNotifications();
   }, [finished, answers, saveAnswers, completeOnboarding]);
 
   function toggle(option: string) {

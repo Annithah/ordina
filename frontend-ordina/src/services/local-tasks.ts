@@ -13,6 +13,8 @@ import { firstRuleError, validateTaskInput, type TaskRuleErrors } from '@/utils/
 
 type Row = {
   id: string;
+  lead_minutes?: number | null;
+  at_time?: string | null;
   title: string;
   description: string | null;
   status: string;
@@ -89,6 +91,45 @@ async function migrate(database: SQLite.SQLiteDatabase) {
       await txn.execAsync('PRAGMA user_version = 1');
     });
   }
+  if (version < 2) {
+    await database.withExclusiveTransactionAsync(async (txn) => {
+      // 1.3: reminders per task, the notification centre, scheduled notifications and app settings.
+      await txn.execAsync(`
+        CREATE TABLE IF NOT EXISTS task_reminders (
+          task_id TEXT PRIMARY KEY NOT NULL,
+          lead_minutes INTEGER,
+          at_time TEXT,
+          notification_id TEXT,
+          overdue_notified INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS notification_log (
+          id TEXT PRIMARY KEY NOT NULL,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          data TEXT,
+          fired_at TEXT NOT NULL,
+          read_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS notification_log_fired ON notification_log(fired_at);
+        CREATE TABLE IF NOT EXISTS planned_notifications (
+          key TEXT PRIMARY KEY NOT NULL,
+          notification_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          fire_at TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          data TEXT
+        );
+        CREATE TABLE IF NOT EXISTS app_meta (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL
+        );
+      `);
+      await txn.execAsync('PRAGMA user_version = 2');
+    });
+  }
 }
 
 /** The phone's database (tasks, categories), opened and migrated once. */
@@ -149,7 +190,9 @@ function toTask(row: Row): Task {
     duration: row.duration ?? undefined,
     deadline: row.deadline ?? undefined,
     recurrence: 'none',
-    reminder: false,
+    reminder: row.lead_minutes !== null && row.lead_minutes !== undefined,
+    reminderLead: row.lead_minutes ?? null,
+    reminderTime: row.at_time ?? null,
     completed: status === 'completed',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -158,13 +201,17 @@ function toTask(row: Row): Task {
 
 export async function listLocalTasks(): Promise<Task[]> {
   const rows = await (await db()).getAllAsync<Row>(
-    'SELECT * FROM tasks ORDER BY due_date IS NULL, due_date, start_time IS NULL, start_time, created_at',
+    `SELECT t.*, r.lead_minutes, r.at_time FROM tasks t LEFT JOIN task_reminders r ON r.task_id = t.id
+     ORDER BY t.due_date IS NULL, t.due_date, t.start_time IS NULL, t.start_time, t.created_at`,
   );
   return rows.map(toTask);
 }
 
 async function getRow(id: string) {
-  return (await db()).getFirstAsync<Row>('SELECT * FROM tasks WHERE id = ?', id);
+  return (await db()).getFirstAsync<Row>(
+    'SELECT t.*, r.lead_minutes, r.at_time FROM tasks t LEFT JOIN task_reminders r ON r.task_id = t.id WHERE t.id = ?',
+    id,
+  );
 }
 
 type TaskInput = Record<string, unknown>;
@@ -234,7 +281,78 @@ export async function setLocalTaskCompleted(id: string, completed: boolean) {
 }
 
 export async function deleteLocalTask(id: string) {
-  await (await db()).runAsync('DELETE FROM tasks WHERE id = ?', id);
+  const database = await db();
+  await database.runAsync('DELETE FROM tasks WHERE id = ?', id);
+  await database.runAsync('DELETE FROM task_reminders WHERE task_id = ?', id);
+}
+
+/**
+ * A task's reminder: minutes before its start (0 = at start), or for an Anytime task a time of
+ * day. `null` lead turns the reminder off. Changing it resets the "overdue nudge sent" mark.
+ */
+export async function setTaskReminder(taskId: string, leadMinutes: number | null, atTime: string | null = null) {
+  const database = await db();
+  if (leadMinutes === null) {
+    await database.runAsync('DELETE FROM task_reminders WHERE task_id = ?', taskId);
+    return;
+  }
+  await database.runAsync(
+    `INSERT INTO task_reminders (task_id, lead_minutes, at_time, overdue_notified, updated_at) VALUES (?, ?, ?, 0, ?)
+     ON CONFLICT(task_id) DO UPDATE SET lead_minutes = excluded.lead_minutes, at_time = excluded.at_time, overdue_notified = 0, updated_at = excluded.updated_at`,
+    taskId,
+    Math.max(0, Math.round(leadMinutes)),
+    atTime,
+    new Date().toISOString(),
+  );
+}
+
+/** The scheduled notification ids, stored with each task (read by tests and support). */
+export async function saveReminderNotificationIds(ids: Record<string, string | null>) {
+  const database = await db();
+  await database.withTransactionAsync(async () => {
+    await database.runAsync('UPDATE task_reminders SET notification_id = NULL');
+    for (const [taskId, notificationId] of Object.entries(ids)) {
+      await database.runAsync('UPDATE task_reminders SET notification_id = ? WHERE task_id = ?', notificationId, taskId);
+    }
+  });
+}
+
+/** Tasks whose overdue nudge was already sent (it is never repeated). */
+export async function overdueNotifiedIds(): Promise<Set<string>> {
+  const rows = await (await db()).getAllAsync<{ task_id: string }>('SELECT task_id FROM task_reminders WHERE overdue_notified = 1');
+  return new Set(rows.map((row) => row.task_id));
+}
+
+export async function markOverdueNotified(taskIds: string[]) {
+  const database = await db();
+  const now = new Date().toISOString();
+  for (const taskId of taskIds) {
+    await database.runAsync(
+      `INSERT INTO task_reminders (task_id, lead_minutes, at_time, overdue_notified, updated_at) VALUES (?, NULL, NULL, 1, ?)
+       ON CONFLICT(task_id) DO UPDATE SET overdue_notified = 1`,
+      taskId,
+      now,
+    );
+  }
+}
+
+/** Small settings and state shared with the background notification task (no React needed). */
+export async function getMeta<T>(key: string, fallback: T): Promise<T> {
+  const row = await (await db()).getFirstAsync<{ value: string }>('SELECT value FROM app_meta WHERE key = ?', key);
+  if (!row) return fallback;
+  try {
+    return JSON.parse(row.value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function setMeta(key: string, value: unknown) {
+  await (await db()).runAsync(
+    'INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    key,
+    JSON.stringify(value),
+  );
 }
 
 /**
@@ -302,5 +420,5 @@ export async function countLocalTasks() {
 
 /** Removes every task and plan record on this phone. */
 export async function deleteAllLocalData() {
-  await (await db()).execAsync('DELETE FROM tasks; DELETE FROM plan_confirmations;');
+  await (await db()).execAsync('DELETE FROM tasks; DELETE FROM plan_confirmations; DELETE FROM task_reminders;');
 }

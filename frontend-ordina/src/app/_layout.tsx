@@ -7,17 +7,20 @@ import {
 } from '@expo-google-fonts/poppins';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider, Stack, type ErrorBoundaryProps } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 
+import { NotificationPrompt } from '@/components/notification-prompt';
 import { ToastHost } from '@/components/toast';
 import { CrashScreen } from '@/crash-guard';
 import { ThemeProvider, useAppTheme } from '@/providers/theme-provider';
-import { I18nProvider } from '@/providers/i18n-provider';
+import { I18nProvider, useI18n } from '@/providers/i18n-provider';
 import { loadServerOverride } from '@/services/api';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
+import { useNotificationSettings } from '@/store/notification-settings-store';
+import { initNotifications, refreshNotificationLanguage } from '@/services/notifications';
 import { useCategoriesStore } from '@/store/categories-store';
 import { useLockStore } from '@/store/lock-store';
 import { usePreferencesStore } from '@/store/preferences-store';
@@ -26,7 +29,28 @@ import { FEATURES } from '@/config/release';
 function RootStack() {
   const { scheme, colors } = useAppTheme();
   const isSignedIn = useAuthStore((s) => s.isSignedIn);
+  const firstName = useAuthStore((s) => s.user?.name?.split(' ')[0] ?? null);
+  const { locale } = useI18n();
   useArrivalWatch(isSignedIn && FEATURES.arrivalReminders);
+
+  // Notifications: channels, buttons, listeners and a full re-plan, once.
+  useEffect(() => {
+    void useNotificationSettings.getState().load();
+    let cleanup: (() => void) | undefined;
+    void initNotifications({ firstName, locale }).then((stop) => {
+      cleanup = stop;
+    }).catch(() => undefined);
+    return () => cleanup?.();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Their texts follow the app language and the user's first name.
+  const profileSeen = useRef(`${firstName}|${locale}`);
+  useEffect(() => {
+    const key = `${firstName}|${locale}`;
+    if (key === profileSeen.current) return;
+    profileSeen.current = key;
+    void refreshNotificationLanguage({ firstName, locale });
+  }, [firstName, locale]);
 
   return (
     <NavigationThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -45,6 +69,9 @@ function RootStack() {
         <Stack.Screen name="categories" />
         <Stack.Screen name="category/[id]" />
         <Stack.Screen name="ai-history" />
+        <Stack.Screen name="inbox" />
+        <Stack.Screen name="notification-settings" />
+        <Stack.Screen name="backup" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="ai" options={{ animation: 'slide_from_bottom' }} />
@@ -58,6 +85,7 @@ function RootStack() {
         <Stack.Screen name="reminders" />
         <Stack.Screen name="integrations" />
       </Stack>
+      <NotificationPrompt />
       <ToastHost />
     </NavigationThemeProvider>
   );

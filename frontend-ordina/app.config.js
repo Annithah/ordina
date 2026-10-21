@@ -2,7 +2,7 @@
  * Expo config. app.json holds the base settings; this file adjusts them for the
  * Google Play build (EAS profiles "production" and "preview" set EXPO_PUBLIC_STORE_BUILD=1).
  *
- * The store build ships Daily Task Planning, task reminders and ORDINA AI (voice, photos, videos),
+ * The store build ships Daily Task Planning, task reminders and ORDINA AI (voice, photos, files),
  * so it drops the native plugins and Android permissions of features that are switched off in
  * src/config/release.ts. Microphone and notifications are asked for when first used.
  */
@@ -35,8 +35,8 @@ const STORE_BLOCKED_PERMISSIONS = [
   'android.permission.ACCESS_COARSE_LOCATION',
   'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.ACCESS_BACKGROUND_LOCATION',
-  // Task reminders use normal (inexact) scheduled notifications, so exact alarms stay blocked.
-  'android.permission.SCHEDULE_EXACT_ALARM',
+  // USE_EXACT_ALARM is only for alarm-clock and calendar apps on Google Play; ORDINA asks for
+  // SCHEDULE_EXACT_ALARM instead (below) and falls back to inexact reminders when it is off.
   'android.permission.USE_EXACT_ALARM',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -86,6 +86,8 @@ module.exports = ({ config }) => {
         'android.permission.RECORD_AUDIO',
         'android.permission.POST_NOTIFICATIONS',
         'android.permission.RECEIVE_BOOT_COMPLETED',
+        // On-time task reminders on Android 12+ (Settings explains how to allow it when off).
+        'android.permission.SCHEDULE_EXACT_ALARM',
         'android.permission.CAMERA',
         'android.permission.READ_MEDIA_IMAGES',
         'android.permission.READ_MEDIA_VIDEO',

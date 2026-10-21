@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { Alert } from 'react-native';
 
 import { LOCAL_MODE } from '@/config/release';
 import { api } from '@/services/api';
@@ -10,7 +9,8 @@ import {
   setLocalTaskCompleted,
   updateLocalTask,
 } from '@/services/local-tasks';
-import { cancelTaskReminder } from '@/services/notifications';
+import { toast } from '@/components/toast';
+import { celebrateIfAllDone, requestReschedule } from '@/services/notifications';
 import { normalizeCategory } from '@/features/categories';
 import { friendlyError } from '@/utils/task-validation';
 
@@ -32,6 +32,10 @@ export interface Task {
   endTime?: string; // "HH:MM"
   duration?: string; // "1h 30m"
   reminder?: boolean;
+  /** Minutes before the start (0 = at start); null or undefined = no reminder. */
+  reminderLead?: number | null;
+  /** Anytime tasks: the time of day to remind ("HH:MM"). */
+  reminderTime?: string | null;
   recurrence?: 'none' | 'daily' | 'weekly' | 'monthly' | 'custom';
   recurrenceRule?: string;
   goalId?: string;
@@ -80,6 +84,8 @@ function normalizeTask(task: any): Task {
     endTime: task.endTime ?? undefined,
     duration: task.duration ?? '1h',
     reminder: task.reminder ?? false,
+    reminderLead: task.reminderLead ?? (task.reminder ? 10 : null),
+    reminderTime: task.reminderTime ?? null,
     recurrence: task.recurrence ?? 'none',
     recurrenceRule: task.recurrenceRule ?? undefined,
     goalId: task.goalId ? String(task.goalId) : undefined,
@@ -92,6 +98,8 @@ function normalizeTask(task: any): Task {
     updatedAt: task.updatedAt ?? new Date().toISOString(),
   };
 }
+
+let lastSignature = '';
 
 export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
@@ -106,6 +114,12 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       // Offline mode: tasks live on this phone (SQLite); otherwise on the ORDINA server.
       const raw = LOCAL_MODE ? await listLocalTasks() : (await api.get('/api/tasks')).data?.tasks;
       const tasks = Array.isArray(raw) ? raw.map(normalizeTask) : [];
+      // Any change to the tasks (here, from ORDINA AI, a backup...) re-plans the notifications.
+      const signature = tasks.map((task) => `${task.id}|${task.dueDate}|${task.startTime}|${task.completed}|${task.updatedAt}|${task.reminderLead}|${task.reminderTime}`).join(';');
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        requestReschedule('tasks');
+      }
       set({ tasks, loading: false, loadError: null, loadErrorDetail: null });
     } catch (error) {
       set({
@@ -140,16 +154,8 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     if (LOCAL_MODE) await deleteLocalTask(id);
     else await api.delete(`/api/tasks/${id}`);
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== id) }));
-    try {
-      await cancelTaskReminder(id);
-    } catch (error) {
-      Alert.alert(
-        'Task deleted',
-        error instanceof Error
-          ? `The task was deleted, but its scheduled notification could not be canceled: ${error.message}`
-          : 'The task was deleted, but its scheduled notification could not be canceled.',
-      );
-    }
+    // Its reminder and nudges disappear with it.
+    requestReschedule('deleted');
   },
 
   toggleComplete: async (id) => {
@@ -169,19 +175,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       set((state) => ({ tasks: state.tasks.map((item) => (item.id === id ? task : item)) }));
       throw error;
     }
-    if (!task.completed) {
-      try {
-        await cancelTaskReminder(id);
-      } catch (error) {
-        Alert.alert(
-          'Task completed',
-          error instanceof Error
-            ? `The task was completed, but its scheduled notification could not be canceled: ${error.message}`
-            : 'The task was completed, but its scheduled notification could not be canceled.',
-        );
-      }
-    }
     await get().loadTasks();
+    // Done: its reminder is cancelled by the re-plan; finishing the day is celebrated.
+    if (completed) void celebrateIfAllDone((title, body) => toast.success(`${title} ${body}`)).catch(() => undefined);
   },
 
   toggleInProgress: async (id) => {

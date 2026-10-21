@@ -29,7 +29,10 @@ import { pickerOrder } from '@/features/category-tree';
 import { bestTime, defaultCategory, defaultReminderLead } from '@/features/starting-point';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
-import { cancelTaskReminder, scheduleTaskReminder } from '@/services/notifications';
+import { askForNotifications } from '@/services/notifications';
+import { confirmLocalPlan, setTaskReminder } from '@/services/local-tasks';
+import { announceTasksAdded } from '@/services/task-feedback';
+import { useNotificationSettings } from '@/store/notification-settings-store';
 import { useAuthStore } from '@/store/auth-store';
 import { nameOf, useCategoriesStore } from '@/store/categories-store';
 import { usePreferencesStore } from '@/store/preferences-store';
@@ -52,7 +55,6 @@ import { FEATURES, LOCAL_MODE } from '@/config/release';
 import { isTimeOver, parsedToDrafts } from '@/features/tasks/parsed-drafts';
 import { PARSED_TITLE_MAX, PLAN_INPUT_MAX, parseTasks } from '@/features/tasks/parseTasks';
 import { confirmPlan } from '@/services/ai';
-import { confirmLocalPlan } from '@/services/local-tasks';
 import type { DraftTask } from '@/types/plan';
 import { toConfirmPayload } from '@/utils/plan-draft';
 
@@ -80,7 +82,8 @@ const REPEATS: { id: string; label: string; recurrence: NonNullable<Task['recurr
 const REMINDERS: { minutes: number | null; label: string }[] = [
   { minutes: null, label: 'task.reminderOff' },
   { minutes: 0, label: 'task.atStart' },
-  { minutes: 10, label: 'task.min10' },
+  { minutes: 5, label: 'task.min5' },
+  { minutes: 15, label: 'task.min15' },
   { minutes: 30, label: 'task.min30' },
   { minutes: 60, label: 'task.hour1' },
   { minutes: 1440, label: 'task.day1' },
@@ -269,9 +272,18 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
       && (item.rule ?? undefined) === (taskToEdit.recurrence === 'custom' ? taskToEdit.recurrenceRule : undefined));
     return repeat?.id ?? 'none';
   });
+  const defaultLead = useNotificationSettings((s) => s.settings.defaultLead);
+  // A new task starts with the intro's reminder choice; "a little before" uses the default from Settings.
+  const leadFor = (priority: Priority) => {
+    const lead = defaultReminderLead(answers, priority);
+    return lead === 10 ? defaultLead : lead;
+  };
   const [reminderLead, setReminderLead] = useState<number | null>(
-    taskToEdit ? (taskToEdit.reminder ? 10 : null) : defaultReminderLead(answers, 'medium'),
+    taskToEdit ? (taskToEdit.reminderLead ?? null) : leadFor('medium'),
   );
+  // Anytime tasks: remind at this time, or with the morning plan when null.
+  const [reminderTime, setReminderTime] = useState<string | null>(taskToEdit?.reminderTime ?? null);
+  const [customReminderOpen, setCustomReminderOpen] = useState(false);
   const reminderTouched = useRef(Boolean(taskToEdit));
   const [contact, setContact] = useState<{ name: string; phone?: string } | null>(
     taskToEdit?.contactName ? { name: taskToEdit.contactName, phone: taskToEdit.contactPhone } : null,
@@ -341,7 +353,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
   function choosePriority(next: Priority) {
     setPriority(next);
     // "Only important things": a new task gets a reminder once it is marked High.
-    if (!reminderTouched.current) setReminderLead(defaultReminderLead(answers, next));
+    if (!reminderTouched.current) setReminderLead(leadFor(next));
   }
 
   function applyDetected() {
@@ -469,23 +481,16 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
     }
 
     if (savedTaskId) {
-      // The task is saved. Local notifications are best-effort and must never hold up saving.
-      const id = savedTaskId;
-      const reminder = FEATURES.taskReminders && reminderLead !== null
-        ? (() => {
-          const start = dateFromKey(dueDate, startTime || '09:00');
-          const when = new Date(start.getTime() - reminderLead * 60_000);
-          return scheduleTaskReminder(id, payload.title, when.getTime() > Date.now() ? when : start, {
-            body: startTime
-              ? `${dayLabel(dueDate)} · ${formatTime12(startTime)}${contact ? ` · ${contact.name}` : ''}`
-              : t('task.plannedFor', { day: dayLabel(dueDate) }),
-          });
-        })()
-        : cancelTaskReminder(id);
-      void Promise.resolve(reminder).catch(() => undefined);
+      // The task is saved. Its reminder is stored with it and the notifications are re-planned
+      // (editing the time moves the reminder, turning it off cancels it).
+      const lead = FEATURES.taskReminders ? reminderLead : null;
+      await setTaskReminder(savedTaskId, lead, startTime ? null : reminderTime).catch(() => undefined);
+      void loadTasks();
+      if (lead !== null) void askForNotifications();
     }
     setSaving(false);
-    toast.success(isEditMode ? t('task.changesSaved') : t('task.added'));
+    if (isEditMode) toast.success(t('task.changesSaved'));
+    else if (savedTaskId) void announceTasksAdded([{ id: savedTaskId, dueDate }]);
     router.back();
   }
 
@@ -502,9 +507,10 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
     for (const draft of preview.drafts) {
       if (draft.suggestedCategory && draft.category !== draft.suggestedCategory) void learn(draft.title, draft.suggestedCategory, draft.category);
     }
+    let created: { id: string; dueDate?: string | null }[] = [];
     try {
-      if (LOCAL_MODE) await confirmLocalPlan(preview.planId, payload);
-      else await confirmPlan(preview.planId, payload);
+      created = (LOCAL_MODE ? await confirmLocalPlan(preview.planId, payload) : await confirmPlan(preview.planId, payload)).created
+        .map((task) => ({ id: task.id, dueDate: (task as { dueDate?: string }).dueDate }));
     } catch (error) {
       savingPreviewRef.current = false;
       setSavingPreview(false);
@@ -512,7 +518,7 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
       return;
     }
     await loadTasks().catch(() => undefined);
-    toast.success(`${payload.length} tasks added to your plan`);
+    void announceTasksAdded(created);
     router.back();
   }
 
@@ -825,7 +831,41 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
                   }}
                 />
               ))}
+              <Chip
+                label={reminderLead !== null && !REMINDERS.some((item) => item.minutes === reminderLead)
+                  ? t('task.reminderCustomValue', { time: formatDuration(reminderLead) })
+                  : t('task.reminderCustom')}
+                active={reminderLead !== null && !REMINDERS.some((item) => item.minutes === reminderLead)}
+                onPress={() => setCustomReminderOpen(true)}
+              />
             </View>
+            {!startTime && reminderLead !== null ? (
+              <View style={{ gap: 6 }}>
+                <ThemedText themeColor="textSecondary" style={styles.helper}>{t('task.reminderAnytime')}</ThemedText>
+                <View style={styles.wrap}>
+                  <Chip label={t('task.reminderMorning')} active={!reminderTime} onPress={() => setReminderTime(null)} />
+                  <Chip
+                    label={reminderTime ? formatTime12(reminderTime) : t('task.reminderPickTime')}
+                    icon="time-outline"
+                    active={Boolean(reminderTime)}
+                    onPress={() => {
+                      const base = dateFromKey(dueDate, reminderTime ?? '12:00');
+                      if (Platform.OS === 'android') {
+                        DateTimePickerAndroid.open({
+                          value: base,
+                          mode: 'time',
+                          onChange: (event: DateTimePickerEvent, chosen?: Date) => {
+                            if (event.type === 'set' && chosen) setReminderTime(timeFromMinutes(chosen.getHours() * 60 + chosen.getMinutes()));
+                          },
+                        });
+                      } else {
+                        setReminderTime('12:00');
+                      }
+                    }}
+                  />
+                </View>
+              </View>
+            ) : null}
           </Section> : null}
 
           {FEATURES.repeatingTasks ? (
@@ -916,6 +956,17 @@ function TaskForm({ taskToEdit, presetDate, presetTime, presetCategory }: { task
         </Modal>
       ) : null}
 
+      <CustomDuration
+        key={customReminderOpen ? 'reminder-open' : 'reminder-closed'}
+        visible={customReminderOpen}
+        minutes={reminderLead && reminderLead >= 5 ? reminderLead : 45}
+        onCancel={() => setCustomReminderOpen(false)}
+        onSave={(value) => {
+          reminderTouched.current = true;
+          setReminderLead(value);
+          setCustomReminderOpen(false);
+        }}
+      />
       <CustomDuration
         key={customOpen ? 'open' : 'closed'}
         visible={customOpen}

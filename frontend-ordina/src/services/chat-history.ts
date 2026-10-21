@@ -100,6 +100,11 @@ async function migrate(database: SQLite.SQLiteDatabase) {
   }
 }
 
+/** The chat database (backup export and import use it). */
+export function chatDb() {
+  return db();
+}
+
 function db() {
   if (!dbPromise) {
     dbPromise = (async () => {

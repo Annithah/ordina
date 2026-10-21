@@ -290,6 +290,8 @@ export default function SettingsScreen() {
             {FEATURES.integrations ? (
               <Row icon="git-network-outline" label={t('profile.integrations')} onPress={() => router.push(href('/integrations'))} />
             ) : null}
+            <Row icon="notifications-outline" label={t('notifSettings.title')} onPress={() => router.push(href('/notification-settings'))} />
+            <Row icon="cloud-upload-outline" label={t('backup.title')} onPress={() => router.push(href('/backup'))} />
             <AiServerRow />
             <Row icon="refresh-outline" label={t('profile.replayIntro')} last onPress={() => router.push(href('/onboarding'))} />
           </Section>

@@ -66,7 +66,9 @@ import {
   getGoogleCalendarBusyEvents,
   getGoogleCalendarConnection,
 } from '@/services/google-calendar';
-import { scheduleTaskReminder } from '@/services/notifications';
+import { setTaskReminder } from '@/services/local-tasks';
+import { getSettings } from '@/services/notifications';
+import { announceTasksAdded } from '@/services/task-feedback';
 import { useAuthStore } from '@/store/auth-store';
 import { useCategoriesStore } from '@/store/categories-store';
 import { useTasksStore } from '@/store/tasks-store';
@@ -89,8 +91,6 @@ const STATE_LABEL: Record<VoiceState, string> = {
   completed: 'Done',
   error: 'Try again',
 };
-
-const REMINDER_LEAD_MINUTES = 10;
 
 type ProposedTask = {
   id?: string;
@@ -181,11 +181,6 @@ async function readHead(uri: string): Promise<Uint8Array> {
     // Some content:// files cannot be opened for reading by bytes; fall back to base64.
     return headBytes((await readBase64(uri)).slice(0, 128));
   }
-}
-
-/** A reminder time still ahead, else the start itself. */
-function reminderTime(start: Date, lead: Date) {
-  return lead.getTime() > Date.now() ? lead : start;
 }
 
 function fileExists(uri: string) {
@@ -451,7 +446,7 @@ export default function OrdinaAiScreen() {
       const saved = await confirmPlan(plan.planId, toConfirmPayload(drafts));
       await loadTasks();
       const count = saved.created.length;
-      toast.success(`Added ${count} task${count === 1 ? '' : 's'} to your plan`);
+      void announceTasksAdded(saved.created.map((task) => ({ id: task.id, dueDate: (task as { dueDate?: string }).dueDate })), { undo: false });
       setPlanStatus(planMessageId, { status: 'added', added: count });
       setPlan(null);
       setPlanMessageId(null);
@@ -515,17 +510,12 @@ export default function OrdinaAiScreen() {
         rescheduled?: { id: string; title: string; dueDate?: string; startTime?: string; reminder?: boolean; contactName?: string }[];
       };
       const followUpErrors: string[] = [];
-      // Reminders are best-effort and run in the background: a pending permission
-      // prompt must never keep the plan stuck on "Saving...".
-      for (const task of [...(saved.created ?? []), ...(saved.rescheduled ?? [])]) {
-        if (!FEATURES.taskReminders || !task.reminder || !task.dueDate) continue;
-        const start = new Date(`${task.dueDate}T${task.startTime || '09:00'}:00`);
-        const when = task.startTime ? new Date(start.getTime() - REMINDER_LEAD_MINUTES * 60_000) : start;
-        void scheduleTaskReminder(String(task.id), task.title, reminderTime(start, when), {
-          body: task.startTime
-            ? `Starts at ${task.startTime}${task.contactName ? ` · ${task.contactName}` : ''}`
-            : 'Planned for today',
-        }).catch(() => undefined);
+      // Tasks ORDINA proposed with a reminder get the user's default reminder (Settings).
+      if (FEATURES.taskReminders) {
+        const { defaultLead } = await getSettings().catch(() => ({ defaultLead: 15 }));
+        for (const task of [...(saved.created ?? []), ...(saved.rescheduled ?? [])]) {
+          if (task.reminder && task.dueDate) await setTaskReminder(String(task.id), defaultLead).catch(() => undefined);
+        }
       }
       // Only new tasks become calendar events; moved tasks would otherwise be duplicated.
       const newTasks = chosen.filter((task) => !task.id);
@@ -537,6 +527,7 @@ export default function OrdinaAiScreen() {
         }
       }
       await loadTasks();
+      void announceTasksAdded((saved.created ?? []).map((task) => ({ id: String(task.id), dueDate: task.dueDate })), { undo: false });
       const count = (saved.created ?? []).length + (saved.rescheduled ?? []).length;
       setPlanStatus(resultMessageId, { status: 'added', added: count });
       setVoice('completed');

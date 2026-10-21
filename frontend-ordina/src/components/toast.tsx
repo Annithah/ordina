@@ -12,14 +12,14 @@ type ToastKind = 'success' | 'error' | 'info';
 type ToastAction = { label: string; onPress: () => void; duration?: number };
 
 type ToastState = {
-  toast: { id: number; kind: ToastKind; message: string; action?: ToastAction } | null;
-  show: (kind: ToastKind, message: string, action?: ToastAction) => void;
+  toast: { id: number; kind: ToastKind; message: string; actions: ToastAction[]; duration?: number } | null;
+  show: (kind: ToastKind, message: string, actions?: ToastAction[], duration?: number) => void;
   hide: () => void;
 };
 
 const useToastStore = create<ToastState>((set) => ({
   toast: null,
-  show: (kind, message, action) => set({ toast: { id: Date.now(), kind, message, action } }),
+  show: (kind, message, actions = [], duration) => set({ toast: { id: Date.now(), kind, message, actions, duration } }),
   hide: () => set({ toast: null }),
 }));
 
@@ -29,7 +29,9 @@ export const toast = {
   error: (message: string) => useToastStore.getState().show('error', message),
   info: (message: string) => useToastStore.getState().show('info', message),
   /** A message with one button, e.g. "Task deleted · Undo". */
-  action: (message: string, action: ToastAction) => useToastStore.getState().show('info', message, action),
+  action: (message: string, action: ToastAction) => useToastStore.getState().show('info', message, [action], action.duration),
+  /** Up to two buttons, e.g. "3 tasks added · Undo · View". */
+  actions: (kind: ToastKind, message: string, actions: ToastAction[], duration = 5000) => useToastStore.getState().show(kind, message, actions.slice(0, 2), duration),
 };
 
 export function ToastHost() {
@@ -40,7 +42,7 @@ export function ToastHost() {
 
   useEffect(() => {
     if (!current) return;
-    const timer = setTimeout(hide, current.action?.duration ?? (current.kind === 'success' ? 2500 : 4000));
+    const timer = setTimeout(hide, current.duration ?? (current.kind === 'success' ? 2500 : 4000));
     return () => clearTimeout(timer);
   }, [current, hide]);
 
@@ -55,18 +57,19 @@ export function ToastHost() {
         style={[styles.toast, { backgroundColor: theme.card, borderColor: color }]}>
         <Ionicons name={current.kind === 'success' ? 'checkmark-circle' : current.kind === 'info' ? 'information-circle' : 'alert-circle'} size={20} color={color} />
         <ThemedText style={styles.text}>{current.message}</ThemedText>
-        {current.action ? (
+        {current.actions.map((action) => (
           <Pressable
+            key={action.label}
             accessibilityRole="button"
             hitSlop={8}
             onPress={() => {
-              current.action?.onPress();
+              action.onPress();
               hide();
             }}
             style={styles.action}>
-            <ThemedText style={[styles.actionText, { color }]}>{current.action.label}</ThemedText>
+            <ThemedText style={[styles.actionText, { color }]}>{action.label}</ThemedText>
           </Pressable>
-        ) : null}
+        ))}
       </Pressable>
     </View>
   );

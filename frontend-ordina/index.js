@@ -5,6 +5,14 @@ const { installCrashGuard, withCrashGuard, crashRoot } = require('./src/crash-gu
 
 installCrashGuard();
 
+// Notification buttons pressed while the app is closed are handled by this background task;
+// it must be defined when the bundle loads.
+try {
+  require('./src/services/notification-task');
+} catch {
+  // Notifications are optional; the app still opens.
+}
+
 const { renderRootComponent } = require('expo-router/build/renderRootComponent');
 
 let Root;

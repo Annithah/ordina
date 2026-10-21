@@ -12,6 +12,8 @@ import { toast } from '@/components/toast';
 import { asIcon, useCategoryName } from '@/components/category-ui';
 import { categoryInfo } from '@/features/categories';
 import { dashboardCounts } from '@/features/dashboard';
+import { useInbox } from '@/services/notifications';
+import { href } from '@/utils/href';
 import { categoryCounts, filterByCategory, groupByCategory } from '@/features/task-filter';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
@@ -105,6 +107,7 @@ export default function HomeScreen() {
   const [selectedDate, setSelectedDate] = useState(localDateKey());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<string | null>(null);
+  const unread = useInbox((s) => s.unread);
 
   // Read the saved tasks again whenever Home is shown and whenever the app comes back to the front.
   useFocusEffect(useCallback(() => {
@@ -200,7 +203,21 @@ export default function HomeScreen() {
             minimumFontScale={0.8}>
             {formatGreeting(t)}, {firstName(user?.name, t('home.there'))}
           </ThemedText>
-          <ThemeToggle />
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={unread ? t('inbox.bellUnread', { n: unread }) : t('inbox.title')}
+              onPress={() => router.push(href('/inbox'))}
+              style={({ pressed }) => [styles.bell, { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.8 : 1 }]}>
+              <Ionicons name={unread ? 'notifications' : 'notifications-outline'} size={20} color={theme.text} />
+              {unread ? (
+                <View style={[styles.bellBadge, { backgroundColor: theme.danger, borderColor: theme.background }]}>
+                  <ThemedText style={styles.bellBadgeText}>{unread > 9 ? '9+' : unread}</ThemedText>
+                </View>
+              ) : null}
+            </Pressable>
+            <ThemeToggle />
+          </View>
         </View>
 
         <Pressable
@@ -578,6 +595,10 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  bell: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  bellBadge: { position: 'absolute', top: -3, right: -3, minWidth: 20, height: 20, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  bellBadgeText: { color: '#FFFFFF', fontSize: 10, lineHeight: 13, fontFamily: 'Poppins_700Bold' },
   safe: { flex: 1 },
   scroll: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
   header: {
