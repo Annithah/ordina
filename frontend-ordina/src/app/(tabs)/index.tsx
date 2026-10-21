@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { AppState, Pressable, ScrollView, StyleSheet, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ContactActions } from '@/components/contact-actions';
@@ -11,7 +11,8 @@ import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { asIcon, useCategoryName } from '@/components/category-ui';
 import { categoryInfo } from '@/features/categories';
-import { categoryCounts, filterByCategory, groupByCategory, searchTasks } from '@/features/task-filter';
+import { dashboardCounts } from '@/features/dashboard';
+import { categoryCounts, filterByCategory, groupByCategory } from '@/features/task-filter';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
@@ -44,6 +45,12 @@ function formatGreeting(t: (path: string) => string): string {
   if (hour < 17) return t('home.afternoon');
   return t('home.evening');
 }
+
+const CARD_LABEL: Record<'completed' | 'inProgress' | 'overdue', string> = {
+  completed: 'home.cardCompleted',
+  inProgress: 'home.cardInProgress',
+  overdue: 'home.cardOverdue',
+};
 
 const STATUS_KEY: Record<DashboardStatus, string> = {
   completed: 'home.completed',
@@ -96,11 +103,8 @@ export default function HomeScreen() {
     return new Date(date.getFullYear(), date.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(localDateKey());
-  const [query, setQuery] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<string | null>(null);
-  // Tapping a Dashboard number shows only those tasks.
-  const [statusFilter, setStatusFilter] = useState<DashboardStatus | null>(null);
 
   // Read the saved tasks again whenever Home is shown and whenever the app comes back to the front.
   useFocusEffect(useCallback(() => {
@@ -130,16 +134,8 @@ export default function HomeScreen() {
   const today = localDateKey();
   const tomorrow = addLocalDays(today, 1);
   const todaysTasks = tasks.filter((task) => task.dueDate === today);
-  // Dashboard: today's completed and started tasks, and every unfinished task whose time has passed.
-  const dash = useMemo(() => {
-    const counts = { completed: 0, inProgress: 0, overdue: 0, todo: 0 };
-    for (const task of tasks) {
-      const status = dashboardStatus(task);
-      if (status === 'overdue') counts.overdue += 1;
-      else if (task.dueDate === today) counts[status] += 1;
-    }
-    return counts;
-  }, [tasks, today]);
+  // Dashboard: the same function gives these numbers and the lists the cards open on the Tasks page.
+  const dash = useMemo(() => dashboardCounts(tasks), [tasks]);
   const upcomingCount = tasks.filter((task) => !task.completed && Boolean(task.dueDate && task.dueDate > today)).length;
   const activeGoals = goals.filter((goal) => !goal.completed && goal.status !== 'archived');
   const activeReminders = reminders.filter(
@@ -184,23 +180,11 @@ export default function HomeScreen() {
 
   const upcomingTasks = tasks.filter((t) => t.dueDate === tomorrow && !t.completed).slice(0, 2);
 
-  // Search looks through every task; otherwise the list shows the selected day. Chips filter both.
+  // The list shows the selected day; the category chips filter it. Search is on the Tasks page.
   const categoryLabel = useCategoryName();
-  const searching = query.trim().length > 0;
   const chips = useMemo(() => categoryCounts(tasks), [tasks]);
   const activeFilter = filter && chips.some((chip) => chip.id === filter) ? filter : null;
-  const byStatus = statusFilter === 'overdue'
-    ? tasks.filter((task) => dashboardStatus(task) === 'overdue')
-    : todaysTasks.filter((task) => dashboardStatus(task) === statusFilter);
-  const listed = filterByCategory(
-    searching
-      ? searchTasks(tasks, query, categoryLabel).sort((a, b) => Number(a.completed) - Number(b.completed)
-        || (b.dueDate ?? '').localeCompare(a.dueDate ?? ''))
-      : statusFilter
-        ? byStatus
-        : todayTasks,
-    activeFilter,
-  );
+  const listed = filterByCategory(todayTasks, activeFilter);
   const groups = groupByCategory(listed);
 
   return (
@@ -228,24 +212,6 @@ export default function HomeScreen() {
           </ThemedText>
           <Ionicons name="mic-outline" size={20} color={theme.textSecondary} />
         </Pressable>
-
-        <View style={[styles.searchBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('home.searchPlaceholder')}
-            placeholderTextColor={theme.textSecondary}
-            accessibilityLabel={t('home.searchPlaceholder')}
-            returnKeyType="search"
-            style={[styles.searchInput, { color: theme.text }]}
-          />
-          {searching ? (
-            <Pressable accessibilityLabel={t('home.clearSearch')} hitSlop={8} onPress={() => setQuery('')}>
-              <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
-            </Pressable>
-          ) : null}
-        </View>
 
         {loadError ? (
           <View accessibilityRole="alert" style={[styles.loadNotice, { backgroundColor: theme.backgroundSelected, borderColor: theme.border }]}>
@@ -309,25 +275,28 @@ export default function HomeScreen() {
               { key: 'completed', value: dash.completed, color: theme.success },
               { key: 'inProgress', value: dash.inProgress, color: theme.warning },
               { key: 'overdue', value: dash.overdue, color: theme.danger },
-            ] as const).map((item) => {
-              const active = statusFilter === item.key;
-              return (
-                <Pressable
-                  key={item.key}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  onPress={() => setStatusFilter(active ? null : item.key)}
-                  style={[styles.metric, { borderColor: active ? item.color : 'transparent', backgroundColor: active ? `${item.color}14` : 'transparent' }]}>
-                  <View style={styles.metricHead}>
-                    <View style={[styles.legendDot, { backgroundColor: item.color }]} />
-                    <ThemedText style={[styles.metricValue, { color: item.color }]}>{item.value}</ThemedText>
-                  </View>
-                  <ThemedText themeColor="textSecondary" style={styles.metricLabel}>
-                    {t(STATUS_KEY[item.key])}
-                  </ThemedText>
-                </Pressable>
-              );
-            })}
+            ] as const).map((item) => (
+              <Pressable
+                key={item.key}
+                accessibilityRole="button"
+                accessibilityLabel={t(CARD_LABEL[item.key], { n: item.value })}
+                accessibilityHint={t('home.cardHint')}
+                // A new "at" each time, so tapping the same card again re-applies the filter.
+                onPress={() => router.push({ pathname: '/tasks', params: { status: item.key, at: String(Date.now()) } })}
+                style={({ pressed }) => [
+                  styles.metric,
+                  { borderColor: pressed ? item.color : theme.border, backgroundColor: pressed ? `${item.color}1F` : `${item.color}0D`, opacity: pressed ? 0.85 : 1 },
+                ]}>
+                <View style={styles.metricHead}>
+                  <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                  <ThemedText style={[styles.metricValue, { color: item.color }]}>{item.value}</ThemedText>
+                  <Ionicons name="chevron-forward" size={14} color={item.color} style={styles.metricArrow} />
+                </View>
+                <ThemedText themeColor="textSecondary" style={styles.metricLabel}>
+                  {t(STATUS_KEY[item.key])}
+                </ThemedText>
+              </Pressable>
+            ))}
           </View>
         </View>
 
@@ -491,26 +460,12 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {statusFilter && !searching ? (
-          <View style={styles.statusFilterRow}>
-            <ThemedText style={[styles.sectionTitle, styles.statusFilterTitle, { color: statusTint(statusFilter, theme) }]}>
-              {t('home.showingStatus', { status: t(STATUS_KEY[statusFilter]), n: listed.length })}
-            </ThemedText>
-            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => setStatusFilter(null)}>
-              <ThemedText style={[styles.clearFilter, { color: theme.primary }]}>{t('home.showAll')}</ThemedText>
-            </Pressable>
-          </View>
-        ) : null}
-        <ThemedText style={[styles.sectionTitle, statusFilter && !searching ? styles.hidden : null]}>
-          {searching
-            ? listed.length === 1
-              ? t('home.oneResult', { q: query.trim() })
-              : t('home.results', { n: listed.length, q: query.trim() })
-            : selectedDate === today
-              ? t('home.todaySchedule')
-              : t('home.scheduleOn', { date: new Date(`${selectedDate}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }) })}
+        <ThemedText style={styles.sectionTitle}>
+          {selectedDate === today
+            ? t('home.todaySchedule')
+            : t('home.scheduleOn', { date: new Date(`${selectedDate}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric' }) })}
         </ThemedText>
-        {!searching && !statusFilter && selectedDayTasks.length > 0 ? (
+        {selectedDayTasks.length > 0 ? (
           <ThemedText themeColor="textSecondary" style={styles.daySummary}>
             {t('home.nOfComplete', { done: selectedDayCompleted, total: selectedDayTasks.length })}
           </ThemedText>
@@ -518,11 +473,9 @@ export default function HomeScreen() {
         {listed.length === 0 ? (
           <View style={[styles.emptyCard, { backgroundColor: theme.card }]}>
             <ThemedText themeColor="textSecondary">
-              {searching
-                ? t('home.noResults', { q: query.trim() })
-                : activeFilter
-                  ? t('home.noTasksInCategory', { category: categoryLabel(activeFilter) })
-                  : t('home.noTasksToday')}
+              {activeFilter
+                ? t('home.noTasksInCategory', { category: categoryLabel(activeFilter) })
+                : t('home.noTasksToday')}
             </ThemedText>
           </View>
         ) : (
@@ -557,7 +510,6 @@ export default function HomeScreen() {
                     <View style={[styles.statusStripe, { backgroundColor: statusTint(status, theme) }]} />
                     <ThemedText themeColor="textSecondary" style={styles.time}>
                       {task.startTime ?? t('home.anytime')}
-                      {searching && task.dueDate ? `\n${new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}` : ''}
                     </ThemedText>
                     <Pressable
                       style={styles.rowBody}
@@ -568,9 +520,6 @@ export default function HomeScreen() {
                       <View style={styles.rowMeta}>
                         <ThemedText style={[styles.rowStatus, { color: statusTint(status, theme) }]}>
                           {t(STATUS_KEY[status])}
-                          {statusFilter === 'overdue' && task.dueDate && task.dueDate !== today
-                            ? ` · ${new Date(`${task.dueDate}T12:00:00`).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}`
-                            : ''}
                         </ThemedText>
                         {task.contactPhone && !task.completed ? (
                           <ContactActions name={task.contactName} phone={task.contactPhone} compact />
@@ -609,7 +558,7 @@ export default function HomeScreen() {
           })
         )}
 
-        {upcomingTasks.length > 0 && !searching ? (
+        {upcomingTasks.length > 0 ? (
           <>
             <ThemedText style={styles.sectionTitle}>{t('home.upcomingTomorrow')}</ThemedText>
             {upcomingTasks.map((task) => (
@@ -672,8 +621,6 @@ const styles = StyleSheet.create({
   loadNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 12 },
   loadNoticeTitle: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   loadNoticeDetail: { fontSize: 11 },
-  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, minHeight: 46, marginBottom: 10 },
-  searchInput: { flex: 1, fontFamily: 'Poppins_400Regular', fontSize: 14, paddingVertical: 10 },
   chipScroll: { marginBottom: 16, flexGrow: 0 },
   chipRow: { gap: 8, paddingRight: 8 },
   filterChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
@@ -691,6 +638,7 @@ const styles = StyleSheet.create({
   startButton: { padding: 2 },
   statusBar: { flexDirection: 'row', height: 8, borderRadius: 4, overflow: 'hidden', marginTop: 10, marginBottom: 12 },
   metricHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metricArrow: { marginLeft: -2 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   rowTitle: { flex: 1, fontSize: 15, fontFamily: 'Poppins_500Medium' },
   strike: { textDecorationLine: 'line-through', opacity: 0.55 },
@@ -718,9 +666,7 @@ const styles = StyleSheet.create({
   overviewHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   integrationsLink: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   overviewMetrics: { flexDirection: 'row', marginTop: 2 },
-  metric: { flex: 1, alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 6, marginHorizontal: 3 },
-  statusFilterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  statusFilterTitle: { flex: 1 },
+  metric: { flex: 1, alignItems: 'center', borderWidth: 1, borderRadius: 12, paddingVertical: 8, marginHorizontal: 3, minHeight: 56, justifyContent: 'center' },
   clearFilter: { fontSize: 13, fontFamily: 'Poppins_600SemiBold', marginTop: -4 },
   hidden: { display: 'none' },
   metricValue: { fontSize: 22, fontFamily: 'Poppins_700Bold' },

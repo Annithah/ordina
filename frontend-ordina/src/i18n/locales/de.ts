@@ -148,6 +148,10 @@ export const de: PartialTranslation = {
     notYou: 'Nicht du? Abmelden',
   },
   home: {
+    cardCompleted: "{n} erledigte Aufgaben anzeigen",
+    cardInProgress: "{n} laufende Aufgaben anzeigen",
+    cardOverdue: "{n} überfällige Aufgaben anzeigen",
+    cardHint: "Öffnet die Aufgaben mit diesem Filter",
     loadFailed: "Deine gespeicherten Aufgaben konnten gerade nicht geöffnet werden.",
     showingStatus: "{status} · {n} Aufgaben",
     showAll: "Alle zeigen",
@@ -321,6 +325,12 @@ export const de: PartialTranslation = {
     plannedFor: 'Geplant für {day}',
   },
   tasksTab: {
+    emptyCompleted: "Noch keine erledigten Aufgaben",
+    emptyInProgress: "Gerade läuft nichts",
+    emptyOverdue: "Keine überfälligen Aufgaben – super!",
+    emptyDashHint: "Tippe oben auf ✕ oder unten auf den Knopf, um alle Aufgaben zu sehen.",
+    showAllTasks: "Alle Aufgaben anzeigen",
+    clearDashFilter: "Filter {status} entfernen",
     viewList: "Liste",
     viewCategory: "Nach Kategorie",
     overdue: "Überfällig",

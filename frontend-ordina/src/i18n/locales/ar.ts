@@ -148,6 +148,10 @@ export const ar: PartialTranslation = {
     notYou: 'لست أنت؟ تسجيل الخروج',
   },
   home: {
+    cardCompleted: "عرض {n} مهام مكتملة",
+    cardInProgress: "عرض {n} مهام قيد التنفيذ",
+    cardOverdue: "عرض {n} مهام متأخرة",
+    cardHint: "يفتح صفحة المهام بهذا الفلتر",
     loadFailed: "تعذّر فتح مهامك المحفوظة الآن.",
     showingStatus: "{status} · {n} مهام",
     showAll: "عرض الكل",
@@ -321,6 +325,12 @@ export const ar: PartialTranslation = {
     plannedFor: 'مخطط لها في {day}',
   },
   tasksTab: {
+    emptyCompleted: "لا توجد مهام مكتملة بعد",
+    emptyInProgress: "لا شيء قيد التنفيذ الآن",
+    emptyOverdue: "لا مهام متأخرة — أحسنت!",
+    emptyDashHint: "اضغط ✕ في الأعلى أو الزر أدناه لعرض كل مهامك.",
+    showAllTasks: "عرض كل المهام",
+    clearDashFilter: "إزالة فلتر {status}",
     viewList: "قائمة",
     viewCategory: "حسب الفئة",
     overdue: "متأخرة",

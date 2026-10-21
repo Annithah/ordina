@@ -148,6 +148,10 @@ export const hi: PartialTranslation = {
     notYou: 'आप नहीं हैं? साइन आउट करें',
   },
   home: {
+    cardCompleted: "{n} पूरे हुए काम दिखाएँ",
+    cardInProgress: "{n} चल रहे काम दिखाएँ",
+    cardOverdue: "{n} देर वाले काम दिखाएँ",
+    cardHint: "इस फ़िल्टर के साथ काम का पेज खोलता है",
     loadFailed: "अभी आपके सेव किए काम नहीं खुल सके।",
     showingStatus: "{status} · {n} काम",
     showAll: "सभी दिखाएँ",
@@ -321,6 +325,12 @@ export const hi: PartialTranslation = {
     plannedFor: '{day} के लिए तय',
   },
   tasksTab: {
+    emptyCompleted: "अभी कोई काम पूरा नहीं हुआ",
+    emptyInProgress: "अभी कुछ भी चल नहीं रहा",
+    emptyOverdue: "कोई काम देर से नहीं — बहुत बढ़िया!",
+    emptyDashHint: "सारे काम देखने के लिए ऊपर ✕ या नीचे का बटन दबाएँ।",
+    showAllTasks: "सभी काम दिखाएँ",
+    clearDashFilter: "{status} फ़िल्टर हटाएँ",
     viewList: "सूची",
     viewCategory: "श्रेणी के अनुसार",
     overdue: "देर हो चुकी",
