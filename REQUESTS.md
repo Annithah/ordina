@@ -24,6 +24,10 @@ the sign-in screen and at the bottom of Settings.
 | 17 | Dashboard Completed / In progress / Overdue not working | Done (1.1.2) | Home → Dashboard; tap a number to see those tasks |
 | 18 | Keyboard covers what is being typed | Done (1.1.3) | Sign in, Sign up, New task, ORDINA AI, Settings |
 | 19 | Push every change, as Annithah, so it shows on GitHub | Done since 20 October | Commits by Annithah <uwihirweannitha@gmail.com> |
+| 20 | ORDINA AI: upload photos and other files | Done (1.2.0) | ORDINA AI → 📎: Camera, Photos, Files (PDF, Word, TXT, CSV), up to 5 files |
+| 21 | Tasks page shows all tasks, also other days | Done (1.2.0) | Tasks: Overdue, Today, Tomorrow, Upcoming, No date, Completed; month picker |
+| 22 | ORDINA AI chat history | Done (1.2.0) | ORDINA AI → clock icon; Settings → Keep chat history / Delete all chats |
+| 23 | Professional categories with grouping (subcategories) | Done (1.2.0) | Settings → Categories; Tasks → By category; picker in New task |
 
 Not possible without extra setup:
 - Google sign-in needs a Google Cloud sign-in key for the app.
