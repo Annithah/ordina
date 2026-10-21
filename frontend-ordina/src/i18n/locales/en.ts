@@ -186,6 +186,10 @@ export const en = {
     notYou: 'Not you? Sign out',
   },
   home: {
+    cardCompleted: "Show {n} completed tasks",
+    cardInProgress: "Show {n} tasks in progress",
+    cardOverdue: "Show {n} overdue tasks",
+    cardHint: "Opens the Tasks page with this filter",
     loadFailed: "We could not open your saved tasks just now.",
     showingStatus: "{status} · {n} tasks",
     showAll: "Show all",
@@ -405,6 +409,12 @@ export const en = {
     plannedFor: 'Planned for {day}',
   },
   tasksTab: {
+    emptyCompleted: "No completed tasks yet",
+    emptyInProgress: "Nothing in progress right now",
+    emptyOverdue: "No overdue tasks — great job!",
+    emptyDashHint: "Tap ✕ above or the button below to see all your tasks.",
+    showAllTasks: "Show all tasks",
+    clearDashFilter: "Remove the {status} filter",
     viewList: "List",
     viewCategory: "By category",
     overdue: "Overdue",

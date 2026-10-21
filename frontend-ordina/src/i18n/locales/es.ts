@@ -148,6 +148,10 @@ export const es: PartialTranslation = {
     notYou: '¿No eres tú? Cerrar sesión',
   },
   home: {
+    cardCompleted: "Ver {n} tareas completadas",
+    cardInProgress: "Ver {n} tareas en curso",
+    cardOverdue: "Ver {n} tareas atrasadas",
+    cardHint: "Abre la página Tareas con este filtro",
     loadFailed: "No pudimos abrir tus tareas guardadas en este momento.",
     showingStatus: "{status} · {n} tareas",
     showAll: "Ver todas",
@@ -321,6 +325,12 @@ export const es: PartialTranslation = {
     plannedFor: 'Planificada para {day}',
   },
   tasksTab: {
+    emptyCompleted: "Aún no hay tareas completadas",
+    emptyInProgress: "Nada en curso ahora mismo",
+    emptyOverdue: "Ninguna tarea atrasada: ¡buen trabajo!",
+    emptyDashHint: "Toca ✕ arriba o el botón de abajo para ver todas tus tareas.",
+    showAllTasks: "Ver todas las tareas",
+    clearDashFilter: "Quitar el filtro {status}",
     viewList: "Lista",
     viewCategory: "Por categoría",
     overdue: "Atrasadas",

@@ -149,6 +149,10 @@ export const fr: PartialTranslation = {
     notYou: 'Ce n’est pas vous ? Se déconnecter',
   },
   home: {
+    cardCompleted: "Voir les {n} tâches terminées",
+    cardInProgress: "Voir les {n} tâches en cours",
+    cardOverdue: "Voir les {n} tâches en retard",
+    cardHint: "Ouvre la page Tâches avec ce filtre",
     loadFailed: "Impossible d’ouvrir vos tâches enregistrées pour le moment.",
     showingStatus: "{status} · {n} tâches",
     showAll: "Tout afficher",
@@ -322,6 +326,12 @@ export const fr: PartialTranslation = {
     plannedFor: 'Prévue pour {day}',
   },
   tasksTab: {
+    emptyCompleted: "Aucune tâche terminée pour l’instant",
+    emptyInProgress: "Rien en cours pour le moment",
+    emptyOverdue: "Aucune tâche en retard — bravo !",
+    emptyDashHint: "Touchez ✕ en haut ou le bouton ci-dessous pour voir toutes vos tâches.",
+    showAllTasks: "Voir toutes les tâches",
+    clearDashFilter: "Retirer le filtre {status}",
     viewList: "Liste",
     viewCategory: "Par catégorie",
     overdue: "En retard",

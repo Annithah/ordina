@@ -64,7 +64,7 @@
   },
   "scripts": {
     "start": "expo start --go",
-    "test": "node --test src/features/tasks/parseTasks.test.mjs src/features/category-tree.test.mjs src/features/task-sections.test.mjs src/features/chat.test.mjs src/features/starting-point.test.mjs src/features/task-filter.test.mjs src/i18n/translations.test.mjs",
+    "test": "node --test src/features/tasks/parseTasks.test.mjs src/features/category-tree.test.mjs src/features/task-sections.test.mjs src/features/chat.test.mjs src/features/dashboard.test.mjs src/features/starting-point.test.mjs src/features/task-filter.test.mjs src/i18n/translations.test.mjs",
     "typecheck": "tsc --noEmit",
     "start:dev-client": "expo start --dev-client",
     "reset-project": "node ./scripts/reset-project.js",

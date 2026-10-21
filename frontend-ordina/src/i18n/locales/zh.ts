@@ -148,6 +148,10 @@ export const zh: PartialTranslation = {
     notYou: '不是您？退出登录',
   },
   home: {
+    cardCompleted: "查看 {n} 项已完成任务",
+    cardInProgress: "查看 {n} 项进行中的任务",
+    cardOverdue: "查看 {n} 项逾期任务",
+    cardHint: "打开带此筛选的任务页面",
     loadFailed: "暂时无法打开已保存的任务。",
     showingStatus: "{status} · {n} 项任务",
     showAll: "显示全部",
@@ -321,6 +325,12 @@ export const zh: PartialTranslation = {
     plannedFor: '计划于{day}',
   },
   tasksTab: {
+    emptyCompleted: "还没有已完成的任务",
+    emptyInProgress: "目前没有进行中的任务",
+    emptyOverdue: "没有逾期任务——做得好！",
+    emptyDashHint: "点按上方的 ✕ 或下面的按钮查看全部任务。",
+    showAllTasks: "显示全部任务",
+    clearDashFilter: "移除“{status}”筛选",
     viewList: "列表",
     viewCategory: "按分类",
     overdue: "已逾期",

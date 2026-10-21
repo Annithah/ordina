@@ -58,6 +58,8 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      // Back from any tab (e.g. a filtered Tasks list opened from a Home card) returns to Home.
+      backBehavior="firstRoute"
       screenOptions={{
         headerShown: false,
         tabBarHideOnKeyboard: true,

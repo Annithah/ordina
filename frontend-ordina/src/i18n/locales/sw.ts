@@ -148,6 +148,10 @@ export const sw: PartialTranslation = {
     notYou: 'Si wewe? Toka',
   },
   home: {
+    cardCompleted: "Onyesha kazi {n} zilizokamilika",
+    cardInProgress: "Onyesha kazi {n} zinazoendelea",
+    cardOverdue: "Onyesha kazi {n} zilizochelewa",
+    cardHint: "Inafungua ukurasa wa Kazi na kichujio hiki",
     loadFailed: "Hatukuweza kufungua kazi zako zilizohifadhiwa sasa hivi.",
     showingStatus: "{status} · kazi {n}",
     showAll: "Onyesha zote",
@@ -321,6 +325,12 @@ export const sw: PartialTranslation = {
     plannedFor: 'Imepangwa {day}',
   },
   tasksTab: {
+    emptyCompleted: "Bado hakuna kazi zilizokamilika",
+    emptyInProgress: "Hakuna kinachoendelea sasa hivi",
+    emptyOverdue: "Hakuna kazi zilizochelewa — hongera!",
+    emptyDashHint: "Gusa ✕ juu au kitufe hapa chini kuona kazi zako zote.",
+    showAllTasks: "Onyesha kazi zote",
+    clearDashFilter: "Ondoa kichujio cha {status}",
     viewList: "Orodha",
     viewCategory: "Kwa kundi",
     overdue: "Zimechelewa",

@@ -20,7 +20,7 @@ export const SECTION_ORDER: SectionId[] = ['overdue', 'today', 'tomorrow', 'upco
 export type SectionRow<T> =
   | { kind: 'task'; key: string; task: T }
   | { kind: 'day'; key: string; date: string }
-  | { kind: 'anytime' | 'scheduled'; key: string };
+  | { kind: 'anytime' | 'scheduled' | 'noDate'; key: string };
 
 export type TaskSection<T> = { id: SectionId; count: number; data: SectionRow<T>[] };
 
@@ -108,4 +108,20 @@ export function openTasksByDay(tasks: SectionTask[]): Map<string, number> {
     if (task.dueDate && !task.completed) counts.set(task.dueDate, (counts.get(task.dueDate) ?? 0) + 1);
   }
   return counts;
+}
+
+/**
+ * Tasks already in the order to show (e.g. a dashboard filter), with a date heading above each
+ * new day ("Mon, 20 Oct") and one "No date" heading for undated tasks.
+ */
+export function dateGroupedRows<T extends SectionTask>(tasks: T[]): SectionRow<T>[] {
+  const rows: SectionRow<T>[] = [];
+  let last: string | null | undefined;
+  for (const task of tasks) {
+    const date = task.dueDate ?? null;
+    if (date !== last) rows.push(date ? { kind: 'day', key: `day-${date}`, date } : { kind: 'noDate', key: 'no-date' });
+    last = date;
+    rows.push({ kind: 'task', key: task.id, task });
+  }
+  return rows;
 }

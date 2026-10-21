@@ -32,8 +32,9 @@ import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { categoryInfo, categoryRegistry, knownCategory } from '@/features/categories';
 import { buildTree, filterTasksByCategories } from '@/features/category-tree';
+import { dashboardStatusAt, dashboardTasks, isDashboardFilter, type DashboardFilter } from '@/features/dashboard';
 import { groupByCategory, searchTasks } from '@/features/task-filter';
-import { buildTaskSections, openTasksByDay, type SectionId, type SectionRow } from '@/features/task-sections';
+import { buildTaskSections, dateGroupedRows, openTasksByDay, type SectionId, type SectionRow } from '@/features/task-sections';
 import { useTheme } from '@/hooks/use-theme';
 import { activeLocale, translate } from '@/i18n/translations';
 import { useI18n } from '@/providers/i18n-provider';
@@ -113,7 +114,9 @@ const TaskRow = memo(function TaskRow({ task, selecting, selected, showDate, onT
   const { t, locale } = useI18n();
   const swipe = useRef<SwipeableMethods>(null);
   const status = taskStatus(task);
-  const color = statusColor(status, theme);
+  const started = dashboardStatusAt(task) === 'inProgress';
+  const color = started ? theme.warning : statusColor(status, theme);
+  const badge = started ? t('home.inProgress') : statusLabel(status);
   const minutes = durationToMinutes(task.duration);
   const time = task.startTime ? formatTime12(task.startTime) : t('task.anytime');
 
@@ -121,7 +124,7 @@ const TaskRow = memo(function TaskRow({ task, selecting, selected, showDate, onT
     <Pressable
       accessibilityRole={selecting ? 'checkbox' : 'button'}
       accessibilityState={selecting ? { checked: selected } : undefined}
-      accessibilityLabel={`${task.title}, ${time}, ${statusLabel(status)}. ${t('tasksTab.opensDetails')}`}
+      accessibilityLabel={`${task.title}, ${task.dueDate ? `${longDay(task.dueDate, locale)}, ` : ''}${time}, ${badge}. ${t('tasksTab.opensDetails')}`}
       accessibilityActions={[{ name: 'complete', label: t('tasksTab.complete') }, { name: 'delete', label: t('tasksTab.delete') }]}
       onAccessibilityAction={(event) => (event.nativeEvent.actionName === 'delete' ? onDelete(task) : onToggle(task))}
       onPress={() => (selecting ? onSelect(task) : router.push({ pathname: '/new-task', params: { id: task.id } }))}
@@ -178,7 +181,7 @@ const TaskRow = memo(function TaskRow({ task, selecting, selected, showDate, onT
         </View>
       </View>
       <View style={[styles.badge, { backgroundColor: `${color}1A` }]}>
-        <ThemedText style={[styles.badgeText, { color }]}>{statusLabel(status)}</ThemedText>
+        <ThemedText style={[styles.badgeText, { color }]}>{badge}</ThemedText>
       </View>
     </Pressable>
   );
@@ -214,9 +217,17 @@ const TaskRow = memo(function TaskRow({ task, selecting, selected, showDate, onT
   );
 });
 
+/** The Home dashboard card each filter came from: its label and empty state. */
+const DASH_LABEL: Record<DashboardFilter, string> = { completed: 'home.completed', inProgress: 'home.inProgress', overdue: 'home.overdue' };
+const DASH_EMPTY: Record<DashboardFilter, string> = {
+  completed: 'tasksTab.emptyCompleted',
+  inProgress: 'tasksTab.emptyInProgress',
+  overdue: 'tasksTab.emptyOverdue',
+};
+
 type ListSection = {
   key: string;
-  kind: 'status' | 'category';
+  kind: 'status' | 'category' | 'dash';
   id: string;
   count: number;
   pending?: number;
@@ -233,10 +244,12 @@ export default function TasksScreen() {
   const categories = useCategoriesStore((s) => s.categories);
   const moveTasks = useCategoriesStore((s) => s.moveTasks);
   const categoryName = useCategoryName();
-  const params = useLocalSearchParams<{ category?: string; date?: string }>();
+  const params = useLocalSearchParams<{ category?: string; date?: string; status?: string; at?: string }>();
   const today = localDateKey();
 
   const [mode, setMode] = useState<ViewMode>('list');
+  // Opened from a Home dashboard card: Completed, In progress or Overdue.
+  const [dashFilter, setDashFilter] = useState<DashboardFilter | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -257,14 +270,22 @@ export default function TasksScreen() {
     void loadTasks();
   }, [loadTasks]);
 
-  // Opened from a category or with a date: show exactly that (applied once per new link).
-  const linkKey = `${params.category ?? ''}|${params.date ?? ''}`;
-  const [appliedLink, setAppliedLink] = useState('|');
+  // Opened from a dashboard card, a category or with a date: show exactly that (once per new link).
+  const linkKey = `${params.category ?? ''}|${params.date ?? ''}|${params.status ?? ''}|${params.at ?? ''}`;
+  const [appliedLink, setAppliedLink] = useState('|||');
   if (linkKey !== appliedLink) {
     setAppliedLink(linkKey);
     const category = knownCategory(params.category);
     if (category) setFilters({ ...NO_FILTERS, categories: [category] });
     if (params.date && /^\d{4}-\d{2}-\d{2}$/.test(params.date)) setDay(params.date);
+    if (isDashboardFilter(params.status)) {
+      // Exactly the card's tasks: the same list the Home count comes from.
+      setDashFilter(params.status);
+      setFilters(NO_FILTERS);
+      setQuery('');
+      setDay(null);
+      setMode('list');
+    }
   }
 
   useEffect(() => {
@@ -346,16 +367,23 @@ export default function TasksScreen() {
   const visibleTasks = useMemo(() => tasks.filter((task) => !hidden.has(task.id)), [tasks, hidden]);
 
   const filtered = useMemo(() => {
-    let list = searchTasks(visibleTasks, query, categoryName);
+    const base = dashFilter ? dashboardTasks(visibleTasks, dashFilter) : visibleTasks;
+    let list = searchTasks(base, query, categoryName);
     if (filters.status !== 'all') list = list.filter((task) => (filters.status === 'done' ? task.completed : !task.completed));
     if (filters.priority) list = list.filter((task) => task.priority === filters.priority);
     list = filterTasksByCategories(list, filters.categories, categoryRegistry());
     if (day) list = list.filter((task) => task.dueDate === day);
     return list;
     // categories: the registry changes with them.
-  }, [visibleTasks, query, filters, day, categoryName, categories]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visibleTasks, dashFilter, query, filters, day, categoryName, categories]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sections = useMemo<ListSection[]>(() => {
+    if (mode === 'list' && dashFilter) {
+      // Already in the card's order (completed newest first, overdue oldest first, in progress soonest first).
+      return filtered.length
+        ? [{ key: `dash:${dashFilter}`, kind: 'dash', id: dashFilter, count: filtered.length, collapsed: false, data: dateGroupedRows(filtered) }]
+        : [];
+    }
     if (mode === 'list') {
       return buildTaskSections(filtered, { today, isOverdue: (task) => taskStatus(task) === 'overdue' }).map((section) => {
         const key = `status:${section.id}`;
@@ -379,10 +407,11 @@ export default function TasksScreen() {
         data: isCollapsed ? [] : group.tasks.map((task) => ({ kind: 'task' as const, key: task.id, task })),
       };
     });
-  }, [filtered, mode, today, collapsed, day]);
+  }, [filtered, mode, dashFilter, today, collapsed, day]);
 
   const filterCount = (filters.status !== 'all' ? 1 : 0) + (filters.priority ? 1 : 0) + filters.categories.length;
-  const narrowed = filterCount > 0 || query.trim().length > 0 || Boolean(day);
+  const narrowed = filterCount > 0 || query.trim().length > 0 || Boolean(day) || Boolean(dashFilter);
+  const dashColor = dashFilter === 'completed' ? theme.success : dashFilter === 'overdue' ? theme.danger : theme.warning;
 
   const stripAnchor = weekStart(day ?? today);
   const stripDays = useMemo(() => Array.from({ length: STRIP_DAYS }, (_, index) => addLocalDays(stripAnchor, index - STRIP_BEFORE)), [stripAnchor]);
@@ -465,6 +494,50 @@ export default function TasksScreen() {
         </Pressable>
       </View>
 
+      <View style={styles.searchRow}>
+        <View style={[styles.search, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder={t('tasksTab.searchPlaceholder')}
+            placeholderTextColor={theme.textSecondary}
+            accessibilityLabel={t('tasksTab.searchTasks')}
+            returnKeyType="search"
+            style={[styles.searchInput, { color: theme.text }]}
+          />
+          {query ? (
+            <Pressable accessibilityLabel={t('common.close')} hitSlop={8} onPress={() => setQuery('')}>
+              <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
+            </Pressable>
+          ) : null}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t('tasksTab.filtersTitle')}
+          onPress={() => setFiltersOpen(true)}
+          style={[styles.filterButton, { backgroundColor: filterCount ? theme.primary : theme.card, borderColor: filterCount ? theme.primary : theme.border }]}>
+          <Ionicons name="options-outline" size={20} color={filterCount ? '#FFFFFF' : theme.text} />
+          {filterCount ? <ThemedText style={styles.filterCount}>{filterCount}</ThemedText> : null}
+        </Pressable>
+      </View>
+
+      {dashFilter ? (
+        <View style={styles.activeFilters}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('tasksTab.clearDashFilter', { status: t(DASH_LABEL[dashFilter]) })}
+            onPress={() => setDashFilter(null)}
+            style={[styles.activeChip, styles.dashChip, { backgroundColor: `${dashColor}1F`, borderColor: dashColor }]}>
+            <View style={[styles.dot, { backgroundColor: dashColor, marginLeft: 0 }]} />
+            <ThemedText style={[styles.activeChipText, { color: dashColor, fontFamily: 'Poppins_600SemiBold' }]}>
+              {t(DASH_LABEL[dashFilter])} · {filtered.length}
+            </ThemedText>
+            <Ionicons name="close" size={15} color={dashColor} />
+          </Pressable>
+        </View>
+      ) : null}
+
       <View style={[styles.summary, { backgroundColor: theme.primary }]}>
         <View style={{ flex: 1, gap: 2 }}>
           <ThemedText style={styles.summaryTitle}>
@@ -523,34 +596,6 @@ export default function TasksScreen() {
           );
         })}
       </ScrollView>
-
-      <View style={styles.searchRow}>
-        <View style={[styles.search, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder={t('tasksTab.searchPlaceholder')}
-            placeholderTextColor={theme.textSecondary}
-            accessibilityLabel={t('tasksTab.searchTasks')}
-            returnKeyType="search"
-            style={[styles.searchInput, { color: theme.text }]}
-          />
-          {query ? (
-            <Pressable accessibilityLabel={t('common.close')} hitSlop={8} onPress={() => setQuery('')}>
-              <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
-            </Pressable>
-          ) : null}
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('tasksTab.filtersTitle')}
-          onPress={() => setFiltersOpen(true)}
-          style={[styles.filterButton, { backgroundColor: filterCount ? theme.primary : theme.card, borderColor: filterCount ? theme.primary : theme.border }]}>
-          <Ionicons name="options-outline" size={20} color={filterCount ? '#FFFFFF' : theme.text} />
-          {filterCount ? <ThemedText style={styles.filterCount}>{filterCount}</ThemedText> : null}
-        </Pressable>
-      </View>
 
       <View style={[styles.segment, { backgroundColor: theme.backgroundElement }]}>
         {(['list', 'category'] as const).map((item) => {
@@ -619,6 +664,7 @@ export default function TasksScreen() {
     </View>
   );
 
+  const onlyDash = Boolean(dashFilter) && !filterCount && !query.trim() && !day;
   const empty = loading && tasks.length === 0 ? (
     <View style={styles.loadingBox}>
       <ActivityIndicator color={theme.primary} />
@@ -626,13 +672,21 @@ export default function TasksScreen() {
     </View>
   ) : loadError ? null : (
     <View style={[styles.empty, { backgroundColor: theme.card, borderColor: theme.border }]}>
-      <Ionicons name={narrowed ? (day ? 'sunny-outline' : 'funnel-outline') : 'sparkles-outline'} size={36} color={theme.primary} />
+      <Ionicons
+        name={onlyDash ? (dashFilter === 'overdue' ? 'trophy-outline' : 'sunny-outline') : narrowed ? (day ? 'sunny-outline' : 'funnel-outline') : 'sparkles-outline'}
+        size={36}
+        color={onlyDash ? dashColor : theme.primary}
+      />
       <ThemedText style={styles.emptyTitle}>
-        {day && !filterCount && !query.trim()
-          ? t('tasksTab.nothingPlanned', { day: friendlyDay(day) })
-          : narrowed ? t('tasksTab.noTasksFilter') : t('tasksTab.noTasksYet')}
+        {onlyDash
+          ? t(DASH_EMPTY[dashFilter!])
+          : day && !filterCount && !query.trim()
+            ? t('tasksTab.nothingPlanned', { day: friendlyDay(day) })
+            : narrowed ? t('tasksTab.noTasksFilter') : t('tasksTab.noTasksYet')}
       </ThemedText>
-      <ThemedText themeColor="textSecondary" style={styles.emptyText}>{narrowed ? t('tasksTab.noTasksFilterHint') : t('tasksTab.emptyHint')}</ThemedText>
+      <ThemedText themeColor="textSecondary" style={styles.emptyText}>
+        {onlyDash ? t('tasksTab.emptyDashHint') : narrowed ? t('tasksTab.noTasksFilterHint') : t('tasksTab.emptyHint')}
+      </ThemedText>
       <View style={styles.emptyActions}>
         {narrowed ? (
           <Pressable
@@ -641,9 +695,10 @@ export default function TasksScreen() {
               setFilters(NO_FILTERS);
               setQuery('');
               setDay(null);
+              setDashFilter(null);
             }}
             style={[styles.emptyButton, { backgroundColor: theme.backgroundSelected }]}>
-            <ThemedText style={[styles.emptyButtonText, { color: theme.primary }]}>{t('tasksTab.clearFilters')}</ThemedText>
+            <ThemedText style={[styles.emptyButtonText, { color: theme.primary }]}>{dashFilter ? t('tasksTab.showAllTasks') : t('tasksTab.clearFilters')}</ThemedText>
           </Pressable>
         ) : null}
         <Pressable
@@ -679,8 +734,10 @@ export default function TasksScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={theme.primary} />}
         renderSectionHeader={({ section }) => {
           const info = section.kind === 'category' ? categoryInfo(section.id) : null;
-          const title = info ? categoryName(section.id) : t(SECTION_LABEL[section.id as SectionId]);
-          const tint = section.id === 'overdue' ? theme.danger : info?.color ?? theme.text;
+          const title = info
+            ? categoryName(section.id)
+            : section.kind === 'dash' ? t(DASH_LABEL[section.id as DashboardFilter]) : t(SECTION_LABEL[section.id as SectionId]);
+          const tint = section.kind === 'dash' ? dashColor : section.id === 'overdue' ? theme.danger : info?.color ?? theme.text;
           return (
             <Pressable
               accessibilityRole="button"
@@ -706,6 +763,9 @@ export default function TasksScreen() {
         renderItem={({ item, section }) => {
           if (item.kind === 'day') {
             return <ThemedText themeColor="textSecondary" style={styles.subHead}>{longDay(item.date, locale)}</ThemedText>;
+          }
+          if (item.kind === 'noDate') {
+            return <ThemedText themeColor="textSecondary" style={styles.subHead}>{t('tasksTab.noDate')}</ThemedText>;
           }
           if (item.kind === 'anytime' || item.kind === 'scheduled') {
             return <ThemedText themeColor="textSecondary" style={styles.subHead}>{item.kind === 'anytime' ? t('task.anytime') : t('tasksTab.scheduled')}</ThemedText>;
@@ -927,6 +987,7 @@ const styles = StyleSheet.create({
   segmentText: { fontSize: 13, fontFamily: 'Poppins_600SemiBold' },
   activeFilters: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   activeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 999, paddingHorizontal: 10, minHeight: 32 },
+  dashChip: { borderWidth: 1, minHeight: 36, paddingHorizontal: 12 },
   activeChipText: { fontSize: 12, fontFamily: 'Poppins_500Medium' },
   notice: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingLeft: 12 },
   noticeText: { flex: 1, fontSize: 13, paddingVertical: 10 },
