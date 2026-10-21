@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useCategoryName } from '@/components/category-ui';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { useTheme } from '@/hooks/use-theme';
@@ -14,6 +15,7 @@ import { href } from '@/utils/href';
 export default function ScheduleCreatedScreen() {
   const theme = useTheme();
   const { t, locale } = useI18n();
+  const categoryName = useCategoryName();
   const params = useLocalSearchParams<{ taskIds?: string | string[] }>();
   const allTasks = useTasksStore((state) => state.tasks);
   const taskIds = Array.isArray(params.taskIds) ? params.taskIds : (params.taskIds || '').split(',');
@@ -61,7 +63,7 @@ export default function ScheduleCreatedScreen() {
             <View style={[styles.card, { backgroundColor: theme.card, borderLeftColor: theme.primary }]}>
               <ThemedText style={styles.cardTitle}>{task.title}</ThemedText>
               <ThemedText themeColor="textSecondary">
-                {t(`categories.items.${task.category}`)}
+                {categoryName(task.category)}
                 {task.duration ? ` · ${task.duration}` : ''}
               </ThemedText>
             </View>

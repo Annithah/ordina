@@ -7,7 +7,9 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { CategoryBadge, CategoryPicker } from '@/components/category-ui';
 import { ThemedText } from '@/components/themed-text';
+import { translate } from '@/i18n/translations';
 import { useTheme } from '@/hooks/use-theme';
 import type { DraftTask, PlanField, PlanPriority, PlanQuestion, ValueSource } from '@/types/plan';
 import { displaySource, editDraft, formatDeadline, overlapsByTask, shiftDate, shiftTime } from '@/utils/plan-draft';
@@ -125,8 +127,8 @@ function TaskEditor({ task, today, titleMax, onChange, theme }: { task: DraftTas
   );
 }
 
-function TaskCard({ task, today, titleMax, expanded, overlaps, needsNewTime, onToggle, onChange, onRemove, theme }: {
-  task: DraftTask; today: string; titleMax: number; expanded: boolean; overlaps: string[]; needsNewTime: boolean; onToggle: () => void; onChange: (task: DraftTask) => void; onRemove: () => void; theme: Theme;
+function TaskCard({ task, today, titleMax, expanded, overlaps, needsNewTime, onToggle, onChange, onRemove, onPickCategory, theme }: {
+  task: DraftTask; today: string; titleMax: number; expanded: boolean; overlaps: string[]; needsNewTime: boolean; onToggle: () => void; onChange: (task: DraftTask) => void; onRemove: () => void; onPickCategory: () => void; theme: Theme;
 }) {
   const deadline = formatDeadline(task.deadline);
   return (
@@ -143,6 +145,12 @@ function TaskCard({ task, today, titleMax, expanded, overlaps, needsNewTime, onT
             <ValuePill theme={theme} field="Start" label={task.startTime ? formatTime12(task.startTime) : 'Any time'} source={displaySource(task, 'startTime')} />
             <ValuePill theme={theme} field="Duration" label={formatDuration(task.durationMinutes)} source={displaySource(task, 'durationMinutes')} />
             <ValuePill theme={theme} field="Priority" label={`${task.priority[0].toUpperCase()}${task.priority.slice(1)}`} source={displaySource(task, 'priority')} />
+          </View>
+          <View style={styles.categoryLine}>
+            <CategoryBadge id={task.category} compact onPress={onPickCategory} />
+            {task.suggestedCategory && task.category === task.suggestedCategory ? (
+              <ThemedText themeColor="textSecondary" style={styles.note}>{translate('categories.suggested')}</ThemedText>
+            ) : null}
           </View>
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={expanded ? 'Done editing' : `Edit ${task.title}`} onPress={onToggle} style={styles.iconButton}>
@@ -250,6 +258,7 @@ export function PlanReview(props: PlanReviewProps) {
   const theme = useTheme();
   const { tasks, questions, answers, saving, replanning } = props;
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [categoryFor, setCategoryFor] = useState<string | null>(null);
   const answered = questions.filter((question) => (answers[question.id] ?? '').trim()).length;
   const blocked = tasks.filter((task) => props.needsNewTime?.(task)).length;
   const invalid = tasks.some((task) => !task.title.trim()) || blocked > 0;
@@ -329,9 +338,21 @@ export function PlanReview(props: PlanReviewProps) {
           onToggle={() => setExpanded(expanded === task.key ? null : task.key)}
           onChange={update}
           onRemove={() => remove(task.key)}
+          onPickCategory={() => setCategoryFor(task.key)}
         />
         </View>
       ))}
+
+      <CategoryPicker
+        visible={Boolean(categoryFor)}
+        value={tasks.find((task) => task.key === categoryFor)?.category}
+        onSelect={(id) => {
+          const task = tasks.find((item) => item.key === categoryFor);
+          if (task) update({ ...task, category: id });
+          setCategoryFor(null);
+        }}
+        onClose={() => setCategoryFor(null)}
+      />
 
       {blocked ? (
         <ThemedText accessibilityRole="alert" style={[styles.note, { color: theme.danger }]}>
@@ -395,6 +416,7 @@ const styles = StyleSheet.create({
   iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   noteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   note: { fontSize: 12, lineHeight: 17, flex: 1 },
+  categoryLine: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   editor: { gap: 10, paddingTop: 4 },
   titleInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, minHeight: 44, fontSize: 15, fontFamily: 'Poppins_500Medium' },
   fieldError: { fontSize: 12, fontFamily: 'Poppins_500Medium' },

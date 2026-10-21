@@ -1,13 +1,18 @@
+import { OTHER_ID, knownCategory } from '@/features/categories';
+import { useCategoriesStore } from '@/store/categories-store';
 import type { DraftTask, PlanField, PlanTask, ValueSource } from '@/types/plan';
 import { addLocalDays } from '@/utils/dates';
 import { minutesFromTime, timeFromMinutes } from '@/utils/task-planning';
 
 let counter = 0;
 
-export function toDrafts(tasks: PlanTask[]): DraftTask[] {
+/** Each task gets a suggested category (from its words, what the user taught ORDINA, or its type). */
+export function toDrafts(tasks: (PlanTask & { category?: string | null })[]): DraftTask[] {
+  const { suggest } = useCategoriesStore.getState();
   return tasks.map((task) => {
     counter += 1;
-    return { ...task, key: `t${counter}`, edited: {} };
+    const suggested = knownCategory(task.category) ?? suggest(`${task.title} ${task.description ?? ''}`, task.type);
+    return { ...task, key: `t${counter}`, edited: {}, category: suggested ?? OTHER_ID, suggestedCategory: suggested };
   });
 }
 
@@ -37,6 +42,7 @@ export function toConfirmPayload(tasks: DraftTask[]) {
     title: task.title.trim(),
     description: task.description,
     type: task.type,
+    category: task.category,
     date: task.date,
     startTime: task.startTime,
     durationMinutes: task.durationMinutes,
@@ -56,7 +62,7 @@ export function mergeReplan(previous: DraftTask[], next: PlanTask[]): DraftTask[
   const byTitle = new Map(previous.map((task) => [task.title.trim().toLowerCase(), task]));
   return toDrafts(next).map((task) => {
     const before = byTitle.get(task.title.trim().toLowerCase());
-    return before ? { ...task, sources: before.sources, edited: before.edited } : task;
+    return before ? { ...task, sources: before.sources, edited: before.edited, category: before.category, suggestedCategory: before.suggestedCategory } : task;
   });
 }
 

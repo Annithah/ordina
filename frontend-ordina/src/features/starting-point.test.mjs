@@ -21,6 +21,6 @@ test('the reminder answer sets the reminder of a new task', () => {
 
 test('a new task starts in the user\'s own area', () => {
   assert.equal(defaultCategory({ focus: ['study'] }), 'study');
-  assert.equal(defaultCategory({ focus: ['finance', 'health'] }), 'fitness');
-  assert.equal(defaultCategory({}), 'personal');
+  assert.equal(defaultCategory({ focus: ['finance', 'health'] }), 'health');
+  assert.equal(defaultCategory({}), 'other');
 });

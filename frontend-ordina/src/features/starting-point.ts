@@ -2,7 +2,7 @@
  * What the user chose in the intro questions becomes ORDINA's starting point:
  * their best hours, how they want reminders and the areas they plan for.
  */
-import { DEFAULT_CATEGORY, focusGroups, splitCategories } from './categories.ts';
+import { DEFAULT_CATEGORY, focusCategories } from './categories.ts';
 
 type Answers = Record<string, string[] | undefined>;
 
@@ -37,8 +37,7 @@ export function defaultReminderLead(answers: Answers, priority: string): number 
   }
 }
 
-/** A new task starts in the first category of the user's own areas (e.g. Work, Classes & study). */
+/** A new task starts in the first category of the user's own areas (e.g. Work, Study), else Other. */
 export function defaultCategory(answers: Answers): string {
-  if (!answers.focus?.length) return DEFAULT_CATEGORY;
-  return splitCategories(focusGroups(answers)).mine[0]?.id ?? DEFAULT_CATEGORY;
+  return focusCategories(answers)[0] ?? DEFAULT_CATEGORY;
 }

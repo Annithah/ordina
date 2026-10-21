@@ -3,6 +3,7 @@ import { api, COLD_START_MS } from '@/services/api';
 import { withLaptop } from '@/services/device-session';
 import { knownCategory } from '@/features/categories';
 import { confirmLocalPlan, createLocalTask } from '@/services/local-tasks';
+import { useCategoriesStore } from '@/store/categories-store';
 import { useTasksStore } from '@/store/tasks-store';
 import type { CalendarBusyEvent } from '@/services/google-calendar';
 import type { Plan } from '@/types/plan';
@@ -117,8 +118,8 @@ async function saveProposedTasksOnPhone(tasks: unknown[]) {
       startTime: raw.startTime || undefined,
       duration: raw.durationMinutes || undefined,
       priority: raw.priority === 'high' || raw.priority === 'low' ? raw.priority : 'medium',
-      // Only categories ORDINA knows; anything else would make saving fail.
-      category: knownCategory(raw.category) ?? undefined,
+      // A category the phone knows, else the one its words point to (never an unknown id).
+      category: knownCategory(raw.category) ?? useCategoriesStore.getState().suggest(`${raw.title} ${raw.description ?? ''}`) ?? undefined,
       completed: false,
     });
     created.push({ ...task, reminder: Boolean(raw.reminder), contactName: raw.contactName });

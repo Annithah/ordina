@@ -14,7 +14,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
 import { FEATURES } from '@/config/release';
-import { focusGroups } from '@/features/categories';
+import { useCategoriesStore } from '@/store/categories-store';
 import { useTheme } from '@/hooks/use-theme';
 import { localeName } from '@/i18n/translations';
 import { useI18n } from '@/providers/i18n-provider';
@@ -22,7 +22,6 @@ import { useAppTheme } from '@/providers/theme-provider';
 import { canReachServer, currentApiBaseUrl, normalizeServerUrl, saveServerOverride } from '@/services/api';
 import { countLocalTasks, deleteAllLocalData } from '@/services/local-tasks';
 import { useAuthStore } from '@/store/auth-store';
-import { usePreferencesStore } from '@/store/preferences-store';
 import { useTasksStore } from '@/store/tasks-store';
 import { href } from '@/utils/href';
 
@@ -140,7 +139,6 @@ export default function SettingsScreen() {
   const signOut = useAuthStore((s) => s.signOut);
   const updateName = useAuthStore((s) => s.updateName);
   const loadTasks = useTasksStore((s) => s.loadTasks);
-  const answers = usePreferencesStore((s) => s.answers);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user?.name ?? '');
   const [confirm, setConfirm] = useState<null | 'signOut' | 'deleteTasks'>(null);
@@ -153,8 +151,8 @@ export default function SettingsScreen() {
 
   const displayName = user?.name || t('profile.guest');
   const provider = user?.provider === 'google' ? 'Google' : user?.provider === 'apple' ? 'Apple' : t('profile.providerEmail');
-  const myGroups = answers.focus?.length ? focusGroups(answers) : [];
-  const categoriesValue = myGroups.length ? myGroups.map((group) => t(`categories.groups.${group}`)).join(', ') : undefined;
+  const categoryTotal = useCategoriesStore((s) => s.categories.filter((record) => !record.deletedAt && !record.isArchived).length);
+  const categoriesValue = t('categories.categoryCount', { n: categoryTotal });
 
   async function saveName() {
     if (!name.trim()) return;

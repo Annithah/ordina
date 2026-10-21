@@ -7,6 +7,7 @@ import * as Crypto from 'expo-crypto';
 import * as SQLite from 'expo-sqlite';
 
 import { normalizeCategory } from '@/features/categories';
+import { defaultRecords, migrateCategoryId } from '@/features/category-tree';
 import type { Task } from '@/store/tasks-store';
 import { firstRuleError, validateTaskInput, type TaskRuleErrors } from '@/utils/task-rules';
 
@@ -38,6 +39,63 @@ export class TaskRuleError extends Error {
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
+/**
+ * Schema changes, in order. Each step runs once (PRAGMA user_version) inside a transaction and
+ * only adds tables or rewrites values: testers' tasks are never dropped.
+ */
+async function migrate(database: SQLite.SQLiteDatabase) {
+  const { user_version: version } = (await database.getFirstAsync<{ user_version: number }>('PRAGMA user_version')) ?? { user_version: 0 };
+  if (version < 1) {
+    await database.withExclusiveTransactionAsync(async (txn) => {
+      // 1.2: categories become editable, with one level of subcategories.
+      await txn.execAsync(`
+        CREATE TABLE IF NOT EXISTS categories (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL DEFAULT '',
+          color TEXT NOT NULL,
+          icon TEXT NOT NULL,
+          parent_id TEXT,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_archived INTEGER NOT NULL DEFAULT 0,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          is_pinned INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS categories_parent ON categories(parent_id);
+        CREATE TABLE IF NOT EXISTS category_learning (
+          word TEXT PRIMARY KEY NOT NULL,
+          category_id TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS tasks_category ON tasks(category);
+      `);
+      for (const record of defaultRecords()) {
+        await txn.runAsync(
+          `INSERT OR IGNORE INTO categories (id, name, color, icon, parent_id, sort_order, is_archived, is_default, is_pinned, created_at, updated_at)
+           VALUES (?, '', ?, ?, ?, ?, 0, 1, 0, ?, ?)`,
+          record.id, record.color, record.icon, record.parentId, record.sortOrder, record.createdAt, record.updatedAt,
+        );
+      }
+      // Old fixed-list ids -> the new categories (e.g. homework -> Assignments, empty -> Other).
+      const used = await txn.getAllAsync<{ category: string | null }>('SELECT DISTINCT category FROM tasks');
+      for (const { category } of used) {
+        const next = migrateCategoryId(category);
+        if (next === category) continue;
+        if (category === null) await txn.runAsync('UPDATE tasks SET category = ? WHERE category IS NULL', next);
+        else await txn.runAsync('UPDATE tasks SET category = ? WHERE category = ?', next, category);
+      }
+      await txn.execAsync('PRAGMA user_version = 1');
+    });
+  }
+}
+
+/** The phone's database (tasks, categories), opened and migrated once. */
+export function tasksDb() {
+  return db();
+}
+
 function db() {
   if (!dbPromise) {
     dbPromise = (async () => {
@@ -66,6 +124,7 @@ function db() {
           created_at TEXT NOT NULL
         );
       `);
+      await migrate(database);
       return database;
     })();
     // If opening fails, try again on the next call instead of failing forever.

@@ -10,7 +10,9 @@ const MAX_DURATION = 24 * 60;
 
 const PRIORITIES = new Set(['low', 'medium', 'high']);
 const STATUSES = new Set(['todo', 'pending', 'in_progress', 'completed']);
-const CATEGORIES = new Set(['work', 'personal', 'health', 'learning', 'design', 'database']);
+// Categories are created by the user on the phone: any short lowercase id ("work", "exams", a generated id).
+const CATEGORY_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const CATEGORIES = { has: (id) => CATEGORY_ID.test(id) };
 const RECURRENCES = new Set(['none', 'daily', 'weekly', 'monthly', 'custom']);
 
 function isValidDateKey(value) {

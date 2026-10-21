@@ -10,7 +10,7 @@ import { OnboardingArt } from '@/components/onboarding-art';
 import { PrimaryButton } from '@/components/primary-button';
 import { SocialAuthButtons } from '@/components/social-auth-buttons';
 import { ThemedText } from '@/components/themed-text';
-import { focusGroups } from '@/features/categories';
+import { focusCategories } from '@/features/categories';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { useAuthStore } from '@/store/auth-store';
@@ -83,9 +83,9 @@ const QUESTIONS: Question[] = [
 /** Personal promises shown at the end, based on what the user picked. */
 function personalPlan(answers: OnboardingAnswers, t: T) {
   const lines: { icon: IconName; text: string }[] = [];
-  const groups = focusGroups(answers);
-  if (answers.focus?.length) {
-    const list = groups.slice(0, 3).map((group) => t(`categories.groups.${group}`)).join(', ');
+  const chosen = focusCategories(answers);
+  if (chosen.length) {
+    const list = chosen.slice(0, 3).map((id) => t(`categories.defaults.${id}`)).join(', ');
     lines.push({ icon: 'pricetags-outline', text: t('onboarding.plan.categories', { list }) });
   }
   const energy = answers.energy?.[0];
