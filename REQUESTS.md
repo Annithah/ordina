@@ -28,8 +28,9 @@ the sign-in screen and at the bottom of Settings.
 | 21 | Tasks page shows all tasks, also other days | Done (1.2.0) | Tasks: Overdue, Today, Tomorrow, Upcoming, No date, Completed; month picker |
 | 22 | ORDINA AI chat history | Done (1.2.0) | ORDINA AI → clock icon; Settings → Keep chat history / Delete all chats |
 | 23 | Professional categories with grouping (subcategories) | Done (1.2.0) | Settings → Categories; Tasks → By category; picker in New task |
+| 24 | ORDINA AI without the PC: the Gemini key ships in the app (SQLite), the phone calls Gemini over the internet | Done (1.4.0) | Turn the PC off, use mobile data, plan with ORDINA AI; offline shows a calm message |
 
 Not possible without extra setup:
 - Google sign-in needs a Google Cloud sign-in key for the app.
 - Apple sign-in only exists on iPhone.
-- ORDINA AI needs its server (the laptop on the same Wi-Fi) to answer.
+- ORDINA AI needs internet (it calls Gemini directly; no laptop or server since 1.4.0).
