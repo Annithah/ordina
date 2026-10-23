@@ -13,7 +13,8 @@
       "env": {
         "EXPO_PUBLIC_STORE_BUILD": "1",
         "EXPO_PUBLIC_LOCAL_MODE": "1",
-        "EXPO_PUBLIC_AI_MODE": "direct"
+        "EXPO_PUBLIC_AI_MODE": "direct",
+        "ORG_GRADLE_PROJECT_reactNativeArchitectures": "arm64-v8a"
       },
       "android": {
         "buildType": "apk"
