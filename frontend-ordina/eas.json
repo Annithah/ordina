@@ -13,17 +13,19 @@
       "env": {
         "EXPO_PUBLIC_STORE_BUILD": "1",
         "EXPO_PUBLIC_LOCAL_MODE": "1",
-        "EXPO_PUBLIC_API_URL": "http://10.110.14.12:4000"
+        "EXPO_PUBLIC_AI_MODE": "direct"
       },
       "android": {
         "buildType": "apk"
-      }
+      },
+      "environment": "preview"
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_STORE_BUILD": "1",
-        "EXPO_PUBLIC_API_URL": "https://TODO-set-render-url"
+        "EXPO_PUBLIC_API_URL": "https://TODO-set-render-url",
+        "EXPO_PUBLIC_AI_MODE": "server"
       },
       "android": {
         "buildType": "app-bundle"

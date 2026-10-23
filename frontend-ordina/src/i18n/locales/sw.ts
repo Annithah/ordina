@@ -496,6 +496,13 @@ export const sw: PartialTranslation = {
     slowTitle: 'Inachukua muda kuliko kawaida',
     slowBody: 'ORDINA AI inachelewa kujibu. Tafadhali jaribu tena baada ya muda mfupi.',
     problemTitle: 'Kuna kitu hakikufanya kazi',
+    limitReached: "ORDINA AI imefikia kikomo cha leo. Tafadhali jaribu tena baadaye — bado unaweza kuongeza kazi mwenyewe.",
+    tooFast: "Unatuma maombi haraka sana. Tafadhali subiri dakika moja kisha ujaribu tena.",
+    unavailable: "ORDINA AI haipatikani kwa sasa. Tafadhali jaribu tena baadaye — bado unaweza kuongeza kazi mwenyewe.",
+    safety: "ORDINA AI haiwezi kusaidia ombi hilo. Jaribu kuliandika kwa njia nyingine.",
+    badRequest: "ORDINA AI haikuelewa hilo. Jaribu kuliandika kwa njia nyingine.",
+    emptyAnswer: "Jibu la ORDINA AI halikufika. Tafadhali jaribu tena.",
+    filesTooLarge: "Faili hizi ni kubwa mno kutumwa pamoja. Tafadhali tuma chache kwa wakati mmoja.",
   },
   profile: {
     aiServer: "Seva ya ORDINA AI",

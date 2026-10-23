@@ -9,11 +9,17 @@
 export const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
 
 /**
- * Development test build (EXPO_PUBLIC_LOCAL_MODE=1): no accounts and no cloud server.
- * Tasks live on the phone in SQLite (works fully offline). Only ORDINA AI talks to the
- * backend running on the developer's laptop (EXPO_PUBLIC_API_URL, plain http on Wi-Fi).
+ * Test build (EXPO_PUBLIC_LOCAL_MODE=1): no accounts and no cloud server.
+ * Tasks live on the phone in SQLite (works fully offline).
  */
 export const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
+
+/**
+ * Where ORDINA AI runs (services/ai.ts):
+ *   direct (default)  the phone calls Gemini over HTTPS; the key ships in the app (SQLite app_config)
+ *   server            the phone calls the ORDINA backend, which keeps the key (before a public release)
+ */
+export const AI_MODE: 'direct' | 'server' = process.env.EXPO_PUBLIC_AI_MODE === 'server' ? 'server' : 'direct';
 
 export const FEATURES = {
   /** Google / Apple sign-in buttons (each explains itself when it can't be used on this phone). */

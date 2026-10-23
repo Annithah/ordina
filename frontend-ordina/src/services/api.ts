@@ -16,8 +16,8 @@ function resolveApiBaseUrl(): string {
   const configuredUrl = process.env.EXPO_PUBLIC_API_URL;
   // Release builds (Google Play) only ever talk to the HTTPS production backend, never a
   // laptop or LAN address. The value comes from eas.json and app.config.js checks it.
-  // Exception: the offline test build (EXPO_PUBLIC_LOCAL_MODE=1) talks to the developer's laptop
-  // over plain http on Wi-Fi, for ORDINA AI only.
+  // The test build (EXPO_PUBLIC_LOCAL_MODE=1) keeps tasks on the phone and needs no server;
+  // ORDINA AI calls Gemini directly (services/ai/direct.ts).
   if (!__DEV__ && process.env.EXPO_PUBLIC_LOCAL_MODE === '1') return configuredUrl ?? '';
   if (!__DEV__) return configuredUrl && /^https:\/\//i.test(configuredUrl) ? configuredUrl : '';
   if (configuredUrl && LOCAL_URL.test(configuredUrl)) return devLanApiUrl() ?? configuredUrl;

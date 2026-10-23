@@ -8,18 +8,10 @@
  */
 
 const STORE_BUILD = process.env.EXPO_PUBLIC_STORE_BUILD === '1';
-// Offline test build: tasks on the phone, ORDINA AI on the developer's laptop over http.
+// Test build: tasks live on the phone (SQLite), no ORDINA server.
 const LOCAL_MODE = process.env.EXPO_PUBLIC_LOCAL_MODE === '1';
-
-/** Allows plain-http requests (laptop on the local Wi-Fi). Used only by the offline test build. */
-function withCleartextTraffic(config) {
-  const { withAndroidManifest } = require('expo/config-plugins');
-  return withAndroidManifest(config, (mod) => {
-    const app = mod.modResults.manifest.application?.[0];
-    if (app) app.$['android:usesCleartextTraffic'] = 'true';
-    return mod;
-  });
-}
+// ORDINA AI: "direct" (default) the phone calls Gemini; "server" through the ORDINA backend.
+const AI_SERVER = process.env.EXPO_PUBLIC_AI_MODE === 'server';
 
 // Plugins whose features are hidden in the store build.
 const STORE_EXCLUDED_PLUGINS = new Set([
@@ -67,12 +59,14 @@ module.exports = ({ config }) => {
 
   const apiUrl = process.env.EXPO_PUBLIC_API_URL || '';
   // ORDINA_LOCAL_STORE_PREVIEW=1 lets a developer preview the store scope with `expo start`
-  // against a local backend. The offline test build (LOCAL_MODE) uses the laptop's Wi-Fi address.
-  if (LOCAL_MODE && !/^http:\/\/[\w.-]+(:\d+)?\/?$/i.test(apiUrl)) {
-    throw new Error(`Offline test build needs EXPO_PUBLIC_API_URL set to the laptop address, e.g. http://192.168.1.20:4000 (got "${apiUrl}").`);
-  }
-  if (!LOCAL_MODE && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
+  // against a local backend.
+  const needsServer = !LOCAL_MODE || AI_SERVER;
+  if (needsServer && !isPublicHttpsUrl(apiUrl) && process.env.ORDINA_LOCAL_STORE_PREVIEW !== '1') {
     throw new Error(`Store build needs EXPO_PUBLIC_API_URL set to the HTTPS production backend (got "${apiUrl}").`);
+  }
+  // Direct mode ships the Gemini key in the app (copied into SQLite on first start). Never print it.
+  if (!AI_SERVER && !String(process.env.EXPO_PUBLIC_GEMINI_API_KEY || '').trim()) {
+    throw new Error('ORDINA AI (direct mode) needs EXPO_PUBLIC_GEMINI_API_KEY: add it to .env, or as an EAS environment variable for cloud builds.');
   }
 
   const blocked = new Set([...(config.android?.blockedPermissions ?? []), ...STORE_BLOCKED_PERMISSIONS]);
@@ -96,5 +90,5 @@ module.exports = ({ config }) => {
       blockedPermissions: [...blocked],
     },
   };
-  return LOCAL_MODE ? withCleartextTraffic(result) : result;
+  return result;
 };

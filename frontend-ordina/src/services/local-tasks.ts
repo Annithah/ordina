@@ -130,6 +130,19 @@ async function migrate(database: SQLite.SQLiteDatabase) {
       await txn.execAsync('PRAGMA user_version = 2');
     });
   }
+  if (version < 3) {
+    await database.withExclusiveTransactionAsync(async (txn) => {
+      // 1.4: ORDINA AI calls Gemini from the phone; its settings ship with the app (services/app-config.ts).
+      await txn.execAsync(`
+        CREATE TABLE IF NOT EXISTS app_config (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      await txn.execAsync('PRAGMA user_version = 3');
+    });
+  }
 }
 
 /** The phone's database (tasks, categories), opened and migrated once. */

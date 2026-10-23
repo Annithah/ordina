@@ -15,7 +15,7 @@ import { RETENTION_OPTIONS, type Retention } from '@/features/chat-groups';
 import { deleteAllConversations, getRetention, setRetention } from '@/services/chat-history';
 import { ThemedText } from '@/components/themed-text';
 import { toast } from '@/components/toast';
-import { FEATURES } from '@/config/release';
+import { AI_MODE, FEATURES } from '@/config/release';
 import { useCategoriesStore } from '@/store/categories-store';
 import { useTheme } from '@/hooks/use-theme';
 import { localeName } from '@/i18n/translations';
@@ -70,7 +70,7 @@ function Row({ icon, label, value, onPress, danger, last }: {
   );
 }
 
-/** Where ORDINA AI runs (the laptop on the same Wi-Fi): see it, test it, change it without a new build. */
+/** Where ORDINA AI runs when it goes through the ORDINA server: see it, test it, change it without a new build. */
 function AiServerRow() {
   const theme = useTheme();
   const { t } = useI18n();
@@ -292,7 +292,7 @@ export default function SettingsScreen() {
             ) : null}
             <Row icon="notifications-outline" label={t('notifSettings.title')} onPress={() => router.push(href('/notification-settings'))} />
             <Row icon="cloud-upload-outline" label={t('backup.title')} onPress={() => router.push(href('/backup'))} />
-            <AiServerRow />
+            {AI_MODE === 'server' ? <AiServerRow /> : null}
             <Row icon="refresh-outline" label={t('profile.replayIntro')} last onPress={() => router.push(href('/onboarding'))} />
           </Section>
 

@@ -496,6 +496,13 @@ export const pt: PartialTranslation = {
     slowTitle: 'Está a demorar mais do que o normal',
     slowBody: 'O ORDINA AI está a demorar a responder. Tente de novo daqui a pouco.',
     problemTitle: 'Algo não correu bem',
+    limitReached: "O ORDINA AI atingiu o limite de hoje. Tente mais tarde — pode continuar a adicionar tarefas manualmente.",
+    tooFast: "Está a enviar pedidos muito depressa. Aguarde um minuto e tente novamente.",
+    unavailable: "O ORDINA AI não está disponível neste momento. Tente mais tarde — pode continuar a adicionar tarefas manualmente.",
+    safety: "O ORDINA AI não pode ajudar com esse pedido. Tente reformulá-lo.",
+    badRequest: "O ORDINA AI não percebeu. Tente reformular.",
+    emptyAnswer: "A resposta do ORDINA AI não chegou. Tente novamente.",
+    filesTooLarge: "Estes ficheiros são demasiado grandes para enviar juntos. Envie menos de cada vez.",
   },
   profile: {
     aiServer: "Servidor do ORDINA AI",

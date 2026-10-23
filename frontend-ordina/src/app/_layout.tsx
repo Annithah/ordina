@@ -17,6 +17,7 @@ import { CrashScreen } from '@/crash-guard';
 import { ThemeProvider, useAppTheme } from '@/providers/theme-provider';
 import { I18nProvider, useI18n } from '@/providers/i18n-provider';
 import { loadServerOverride } from '@/services/api';
+import { syncBundledConfig } from '@/services/app-config';
 import { useArrivalWatch } from '@/services/arrival-watch';
 import { useAuthStore } from '@/store/auth-store';
 import { useNotificationSettings } from '@/store/notification-settings-store';
@@ -112,6 +113,8 @@ export default function RootLayout() {
     void hydrateLock();
     void loadPreferences();
     void loadServerOverride();
+    // ORDINA AI's bundled Gemini settings -> SQLite (first start, or an update with a new key).
+    void syncBundledConfig().catch(() => undefined);
     void useCategoriesStore.getState().load();
   }, [hydrate, hydrateLock, loadPreferences]);
 

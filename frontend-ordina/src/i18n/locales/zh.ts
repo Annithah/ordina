@@ -496,6 +496,13 @@ export const zh: PartialTranslation = {
     slowTitle: '比平时慢一些',
     slowBody: 'ORDINA AI 回复较慢，请稍后再试。',
     problemTitle: '出了点问题',
+    limitReached: "ORDINA AI 已达到今日上限。请稍后再试——你仍可以手动添加任务。",
+    tooFast: "你发送请求太快了。请等一分钟再试。",
+    unavailable: "ORDINA AI 暂时不可用。请稍后再试——你仍可以手动添加任务。",
+    safety: "ORDINA AI 无法处理这个请求。请换个说法试试。",
+    badRequest: "ORDINA AI 没有理解。请换个说法试试。",
+    emptyAnswer: "没有收到 ORDINA AI 的回复。请重试。",
+    filesTooLarge: "这些文件一起发送太大了。请每次少发几个。",
   },
   profile: {
     aiServer: "ORDINA AI 服务器",

@@ -41,6 +41,7 @@
     "expo-system-ui": "~57.0.4",
     "expo-task-manager": "~57.0.21",
     "expo-web-browser": "~57.0.3",
+    "fflate": "0.8.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-hook-form": "^7.86.0",
@@ -66,7 +67,7 @@
   },
   "scripts": {
     "start": "expo start --go",
-    "test": "node --test src/features/tasks/parseTasks.test.mjs src/features/category-tree.test.mjs src/features/task-sections.test.mjs src/features/chat.test.mjs src/features/dashboard.test.mjs src/features/notifications.test.mjs src/features/starting-point.test.mjs src/features/task-filter.test.mjs src/i18n/translations.test.mjs",
+    "test": "node --test src/features/ai/ai.test.mjs src/features/tasks/parseTasks.test.mjs src/features/category-tree.test.mjs src/features/task-sections.test.mjs src/features/chat.test.mjs src/features/dashboard.test.mjs src/features/notifications.test.mjs src/features/starting-point.test.mjs src/features/task-filter.test.mjs src/i18n/translations.test.mjs",
     "typecheck": "tsc --noEmit",
     "start:dev-client": "expo start --dev-client",
     "reset-project": "node ./scripts/reset-project.js",

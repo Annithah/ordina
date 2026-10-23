@@ -37,8 +37,8 @@ import { contextWindow, conversationTitle } from '@/features/chat-groups';
 import { useTheme } from '@/hooks/use-theme';
 import { useI18n } from '@/providers/i18n-provider';
 import { aiNoticeKind, isOnline, type AiNoticeKind } from '@/services/connectivity';
-import { LAPTOP_MESSAGE } from '@/services/device-session';
 import { confirmAiActions, confirmPlan, interpretFromFiles, interpretInstruction, requestPlan, transcribeAudio } from '@/services/ai';
+import { friendlyAiMessage, isFileProblem } from '@/services/ai/errors';
 import {
   appendMessages,
   createConversation,
@@ -134,23 +134,22 @@ function friendlyDate(date?: string) {
 }
 
 function errorMessage(error: any, fallback: string) {
-  if (error?.code === 'LAPTOP_UNREACHABLE') return LAPTOP_MESSAGE;
-  const message: string = error?.response?.data?.message || error?.message || '';
-  if (/not configured|GEMINI_API_KEY/i.test(message)) {
-    return 'Voice, photos and files need ORDINA AI to be switched on for the server (GEMINI_API_KEY). You can still type your request.';
-  }
-  if (error?.code === 'ECONNABORTED' || /timeout/i.test(message)) {
+  const friendly = friendlyAiMessage(error);
+  if (friendly) return friendly;
+  const message: string = error?.response?.data?.message || '';
+  if (error?.code === 'ECONNABORTED' || /timeout/i.test(error?.message ?? '')) {
     return 'ORDINA AI took too long to answer. Try a shorter clip or check your connection.';
   }
-  if (/Network Error/i.test(message)) {
-    return 'Cannot reach the ORDINA server. Check that your phone and computer are on the same network.';
+  if (/Network Error/i.test(error?.message ?? '')) {
+    return 'ORDINA AI could not be reached. Check your internet connection and try again.';
   }
   return message || fallback;
 }
 
-/** Server AI errors already carry a friendly message; everything else gets a plain explanation. */
+/** ORDINA AI errors get a friendly message; everything else gets a plain explanation. */
 function aiErrorMessage(error: any, fallback: string) {
-  if (error?.code === 'LAPTOP_UNREACHABLE') return LAPTOP_MESSAGE;
+  const friendly = friendlyAiMessage(error);
+  if (friendly) return friendly;
   if (error?.response?.data?.code && error.response.data.message) return String(error.response.data.message);
   return friendlyError(error, fallback);
 }
@@ -249,10 +248,11 @@ export default function OrdinaAiScreen() {
     messagesRef.current = messages;
   }, [messages]);
 
-  /** Explains a failed AI request calmly: offline, AI not reachable, slow, or the server's own message. */
+  /** Explains a failed AI request calmly: offline, AI not reachable, slow, or what went wrong. The text and files stay. */
   async function showNotice(error: unknown, fallback: string, retry: () => void) {
     const kind: AiNoticeKind = (await isOnline()) ? aiNoticeKind(error) : 'offline';
-    setAiError({ kind, message: kind === 'problem' ? aiErrorMessage(error, fallback) : undefined, retry });
+    const message = kind === 'problem' ? aiErrorMessage(error, fallback) : kind === 'offline' ? t('ai.offlineSend') : undefined;
+    setAiError({ kind, message, retry });
   }
 
   /** No internet: say so before sending anything; the user's text and files stay where they are. */
@@ -692,8 +692,8 @@ export default function OrdinaAiScreen() {
     } catch (error: any) {
       setVoice('error');
       const code = error?.response?.data?.code;
-      // Too large / unsupported / unreadable: the server explains; anything else can be retried.
-      if (code && String(code).startsWith('FILE')) {
+      // Too large / unsupported / unreadable: say which file; anything else can be retried.
+      if (isFileProblem(error) || (code && String(code).startsWith('FILE'))) {
         setAiError({ kind: 'problem', message: aiErrorMessage(error, t('ai.unreadableGeneric')) });
       } else {
         await showNotice(error, t('ai.uploadFailed'), () => void sendFiles(note));
