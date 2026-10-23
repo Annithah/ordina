@@ -65,7 +65,9 @@ module.exports = ({ config }) => {
     throw new Error(`Store build needs EXPO_PUBLIC_API_URL set to the HTTPS production backend (got "${apiUrl}").`);
   }
   // Direct mode ships the Gemini key in the app (copied into SQLite on first start). Never print it.
-  if (!AI_SERVER && !String(process.env.EXPO_PUBLIC_GEMINI_API_KEY || '').trim()) {
+  // Checked on the EAS build server only: eas-cli evaluates this file locally without .env or
+  // sensitive EAS variables.
+  if (!AI_SERVER && process.env.EAS_BUILD === 'true' && !String(process.env.EXPO_PUBLIC_GEMINI_API_KEY || '').trim()) {
     throw new Error('ORDINA AI (direct mode) needs EXPO_PUBLIC_GEMINI_API_KEY: add it to .env, or as an EAS environment variable for cloud builds.');
   }
 
